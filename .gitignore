@@ -1,0 +1,7 @@
+node_modules/
+.env
+auth_info_baileys/
+data/db.json
+data/group_images/*
+!data/group_images/.gitkeep
+*.log

@@ -6,7 +6,12 @@ const db   = require('../lib/database');
 
 const MENU_IMAGE_PNG  = path.join(__dirname, '..', 'assets', 'menu.png');
 const MENU_IMAGE_JPG  = path.join(__dirname, '..', 'assets', 'menu.jpg');
-const MENU_IMAGE_PATH = fs.existsSync(MENU_IMAGE_PNG) ? MENU_IMAGE_PNG : (fs.existsSync(MENU_IMAGE_JPG) ? MENU_IMAGE_JPG : null);
+const LOCAL_MENU_IMAGE_PATH = fs.existsSync(MENU_IMAGE_PNG) ? MENU_IMAGE_PNG : (fs.existsSync(MENU_IMAGE_JPG) ? MENU_IMAGE_JPG : null);
+
+function getMenuImageUrl() {
+  const value = db.getSetting('menuImageUrl', '');
+  return /^https:\/\/[^\s]+$/i.test(String(value || '').trim()) ? String(value).trim() : '';
+}
 
 let PKG_VERSION = '1.0.0';
 try { PKG_VERSION = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')).version || PKG_VERSION; } catch (_) {}
@@ -120,9 +125,15 @@ const mainCommands = {
       const catOrder = allCmds.CATEGORY_ORDER || [];
       const text    = buildMainMenu(cfg, allCmds, catReg, catOrder);
 
-      if (MENU_IMAGE_PATH && fs.existsSync(MENU_IMAGE_PATH)) {
+      const remoteImage = getMenuImageUrl();
+      if (remoteImage) {
         await sock.sendMessage(jid, {
-          image:   fs.readFileSync(MENU_IMAGE_PATH),
+          image:   { url: remoteImage },
+          caption: text
+        });
+      } else if (LOCAL_MENU_IMAGE_PATH && fs.existsSync(LOCAL_MENU_IMAGE_PATH)) {
+        await sock.sendMessage(jid, {
+          image:   fs.readFileSync(LOCAL_MENU_IMAGE_PATH),
           caption: text
         });
       } else {

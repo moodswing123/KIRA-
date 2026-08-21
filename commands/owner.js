@@ -142,6 +142,45 @@ const ownerCommands = {
     })
   },
 
+  setmenuimage: {
+    category: 'owner', desc: 'Set the remote image used by the menu',
+    usage: '.setmenuimage <https image URL>', aliases: ['menuimage'], permissions: 'owner',
+    examples: ['.setmenuimage https://files.catbox.moe/example.jpg'],
+    exec: ownerOnly(async (args, sock, jid) => {
+      const url = String(args[0] || '').trim();
+      if (!/^https:\/\/[^\s]+$/i.test(url)) {
+        return sock.sendMessage(jid, {
+          text: '❌ Usage: .setmenuimage <https image URL>\n\nUse a direct Catbox URL such as https://files.catbox.moe/example.jpg'
+        });
+      }
+      try {
+        const response = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(15000) });
+        const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+        if (!response.ok || !contentType.startsWith('image/')) {
+          throw new Error(`URL returned ${response.status || 'an invalid response'}${contentType ? ` (${contentType})` : ''}`);
+        }
+        db.setSetting('menuImageUrl', url);
+        await sock.sendMessage(jid, {
+          text: `✅ *Menu image updated.*\n\n${url}\n\nUse *.menu* to preview it. The setting will survive restarts.`
+        });
+      } catch (err) {
+        await sock.sendMessage(jid, {
+          text: `❌ That URL could not be validated as a direct image.\n\n${err.message}\n\nUse the Catbox file URL, not the Catbox upload page.`
+        });
+      }
+    })
+  },
+
+  clearmenuimage: {
+    category: 'owner', desc: 'Remove the remote menu image',
+    usage: '.clearmenuimage', aliases: ['resetmenuimage'], permissions: 'owner',
+    examples: ['.clearmenuimage'],
+    exec: ownerOnly(async (args, sock, jid) => {
+      db.setSetting('menuImageUrl', '');
+      await sock.sendMessage(jid, { text: '✅ Remote menu image cleared. The local menu image fallback will be used.' });
+    })
+  },
+
   mode: {
     category: 'owner', desc: 'Set bot mode (public/private)',
     usage: '.mode <public|private>', aliases: [], permissions: 'owner',

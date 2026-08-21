@@ -31,8 +31,9 @@ function ownerContact(botConfig) {
   return number ? `https://wa.me/${number}` : 'Owner number is not configured';
 }
 
-const db      = require('./lib/database');
-const helpers = require('./lib/helpers');
+const db         = require('./lib/database');
+const helpers    = require('./lib/helpers');
+const fontStyles = require('./lib/font');
 
 // ── Config ─────────────────────────────────────────────────────────────────
 const botConfig = {
@@ -158,6 +159,14 @@ async function connectToWhatsApp() {
       return msgCache.get(`${key.remoteJid}:${key.id}`) || undefined;
     }
   });
+
+  // Apply the selected style to bot-generated text and captions centrally.
+  // Incoming user text and command arguments are never transformed.
+  const rawSendMessage = sock.sendMessage.bind(sock);
+  sock.sendMessage = async (chatJid, content, options) => {
+    const style = db.getSetting('botFont', 'plain');
+    return rawSendMessage(chatJid, fontStyles.styleOutgoingContent(content, style), options);
+  };
 
   // ── Save credentials whenever they update ─────────────────────────────
   sock.ev.on('creds.update', saveCreds);

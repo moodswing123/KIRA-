@@ -7,6 +7,7 @@ const axios = require('axios');
 const { downloadMediaMessage } = require('@whiskeysockets/baileys');
 const { spawn } = require('child_process');
 const { getMessageContext, commandErrorMessage } = require('../lib/helpers');
+const db = require('../lib/database');
 
 const WATERMARK = '\n\n_Powered by Victory Tech™_';
 
@@ -244,58 +245,35 @@ const toolCommands = {
   },
 
   font: {
-    category: 'utility', desc: 'Convert text to fancy unicode font styles',
-    usage: '.font <text>', aliases: ['fancy', 'fancytext', 'fontgen'], permissions: 'all',
-    examples: ['.font Hello World', '.font Kira MD'],
+    category: 'utility', desc: 'Set the font style used by all bot replies',
+    usage: '.font <style|list|off>', aliases: ['fancy', 'fancytext', 'fontgen'], permissions: 'all',
+    examples: ['.font bold', '.font sansbold', '.font list', '.font off'],
     exec: async (args, sock, jid) => {
-      const text = args.join(' ').trim();
-      if (!text) return sock.sendMessage(jid, { text: '❌ Usage: .font <text to style>' });
+      const fontStyles = require('../lib/font');
+      const requested = args.join('').trim().toLowerCase();
+      const current = db.getSetting('botFont', 'plain');
 
-      const convert = (str, offset) =>
-        [...str].map(c => {
-          const code = c.codePointAt(0);
-          if (code >= 65 && code <= 90)  return String.fromCodePoint(offset + (code - 65));
-          if (code >= 97 && code <= 122) return String.fromCodePoint(offset + 26 + (code - 97));
-          return c;
-        }).join('');
+      if (!requested || requested === 'list' || requested === 'help') {
+        return sock.sendMessage(jid, {
+          text:
+            `🔤 *BOT REPLY FONT*\n\n` +
+            `Current: *${current}*\n\n` +
+            `${fontStyles.describeStyles()}\n\n` +
+            `Use *.font <style>* to change all future bot replies.\n` +
+            `Use *.font off* to return to normal text.`
+        });
+      }
 
-      const bold    = [...text].map(c => {
-        const cp = c.codePointAt(0);
-        if (cp >= 65 && cp <= 90)  return String.fromCodePoint(0x1D400 + cp - 65);
-        if (cp >= 97 && cp <= 122) return String.fromCodePoint(0x1D41A + cp - 97);
-        if (cp >= 48 && cp <= 57)  return String.fromCodePoint(0x1D7CE + cp - 48);
-        return c;
-      }).join('');
+      const style = fontStyles.normalizeStyle(requested);
+      if (!style) {
+        return sock.sendMessage(jid, {
+          text: `❌ Unknown font style: *${requested}*\n\nUse *.font list* to view the available styles.`
+        });
+      }
 
-      const italic  = [...text].map(c => {
-        const cp = c.codePointAt(0);
-        if (cp >= 65 && cp <= 90)  return String.fromCodePoint(0x1D434 + cp - 65);
-        if (cp >= 97 && cp <= 122) return String.fromCodePoint(0x1D44E + cp - 97);
-        return c;
-      }).join('');
-
-      const small   = text.toLowerCase().split('').map(c => {
-        const map = { a:'ᵃ',b:'ᵇ',c:'ᶜ',d:'ᵈ',e:'ᵉ',f:'ᶠ',g:'ᵍ',h:'ʰ',i:'ⁱ',j:'ʲ',k:'ᵏ',l:'ˡ',m:'ᵐ',n:'ⁿ',o:'ᵒ',p:'ᵖ',q:'ꟶ',r:'ʳ',s:'ˢ',t:'ᵗ',u:'ᵘ',v:'ᵛ',w:'ʷ',x:'ˣ',y:'ʸ',z:'ᶻ' };
-        return map[c] || c;
-      }).join('');
-
-      const bubble  = [...text].map(c => {
-        const cp = c.codePointAt(0);
-        if (cp >= 65 && cp <= 90)  return String.fromCodePoint(0x24B6 + cp - 65);
-        if (cp >= 97 && cp <= 122) return String.fromCodePoint(0x24D0 + cp - 97);
-        if (cp >= 49 && cp <= 57)  return String.fromCodePoint(0x2460 + cp - 49);
-        if (cp === 48) return '⓪';
-        return c;
-      }).join('');
-
+      db.setSetting('botFont', style);
       await sock.sendMessage(jid, {
-        text:
-          `🔤 *Font Styles for:* "${text}"\n\n` +
-          `1️⃣ Bold: ${bold}\n` +
-          `2️⃣ Italic: ${italic}\n` +
-          `3️⃣ Small caps: ${small}\n` +
-          `4️⃣ Bubble: ${bubble}\n` +
-          `5️⃣ Flipped: ${text.split('').reverse().join('')}`
+        text: `✅ Bot reply font changed to *${style}*.\n\nAll future text replies and captions will use this style.`
       });
     }
   },

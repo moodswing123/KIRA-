@@ -6,7 +6,7 @@ const os    = require('os');
 const axios = require('axios');
 const { downloadMediaMessage } = require('@whiskeysockets/baileys');
 const { spawn } = require('child_process');
-const { getMessageContext, commandErrorMessage } = require('../lib/helpers');
+const { getMessageContext, commandErrorMessage, getMessageType } = require('../lib/helpers');
 const db = require('../lib/database');
 
 const WATERMARK = '\n\n_Powered by Victory Tech™_';
@@ -21,16 +21,16 @@ function getCtx(message) {
 
 async function dlQuoted(sock, jid, message, quotedMsg) {
   const ctx = getCtx(message);
-  const fake = {
-    key: {
-      remoteJid: ctx?.remoteJid || jid,
-      id: ctx?.stanzaId || message.key.id,
-      participant: ctx?.participant || message.key.participant,
-      fromMe: false
-    },
-    message: quotedMsg
+  const key = ctx?.quotedKey || {
+    remoteJid: ctx?.remoteJid || jid,
+    id: ctx?.stanzaId || message?.key?.id || '',
+    participant: ctx?.participant || message?.key?.participant,
+    fromMe: false
   };
-  return downloadMediaMessage(fake, 'buffer', { reuploadRequest: sock.updateMediaMessage });
+  if (!key.id) throw new Error('The quoted media message has no message ID');
+  return downloadMediaMessage({ key, message: quotedMsg }, 'buffer', {
+    reuploadRequest: sock.updateMediaMessage
+  });
 }
 
 function ffmpegRun(inputPath, outputPath, extraArgs = []) {
@@ -47,10 +47,29 @@ async function uploadToCatbox(buffer, filename, mimetype) {
   const fd = new FormData();
   fd.append('reqtype', 'fileupload');
   fd.append('fileToUpload', new Blob([buffer], { type: mimetype }), filename);
-  const res  = await fetch('https://catbox.moe/user/api.php', { method: 'POST', body: fd, signal: AbortSignal.timeout(60000) });
-  const text = await res.text();
-  if (!text.startsWith('https://')) throw new Error('Upload failed: ' + text.slice(0, 100));
-  return text.trim();
+  const res = await fetch('https://catbox.moe/user/api.php', {
+    method: 'POST', body: fd, signal: AbortSignal.timeout(60000)
+  });
+  const text = (await res.text()).trim();
+  if (!res.ok || !/^https?:\/\//i.test(text)) throw new Error(`Catbox upload failed: ${text.slice(0, 160)}`);
+  return text;
+}
+
+async function uploadToPublicUrl(buffer, filename, mimetype) {
+  try {
+    return await uploadToCatbox(buffer, filename, mimetype);
+  } catch (catboxErr) {
+    const fd = new FormData();
+    fd.append('file', new Blob([buffer], { type: mimetype }), filename);
+    const res = await fetch('https://0x0.st', {
+      method: 'POST', body: fd, signal: AbortSignal.timeout(60000)
+    });
+    const text = (await res.text()).trim();
+    if (!res.ok || !/^https?:\/\//i.test(text)) {
+      throw new Error(`Public upload failed. Catbox: ${catboxErr.message}; fallback: ${text.slice(0, 120)}`);
+    }
+    return text;
+  }
 }
 
 // Vyro AI image operations
@@ -300,25 +319,34 @@ const toolCommands = {
   },
 
   tourl: {
-    category: 'utility', desc: 'Upload media and get a direct URL (reply to image/video/audio)',
+    category: 'utility', desc: 'Upload replied media and return a public URL',
     usage: '.tourl', aliases: ['upload', 'getlink'], permissions: 'all',
-    examples: ['.tourl (reply to image/video/audio)'],
+    examples: ['.tourl (reply to image, video, audio, or document)'],
     exec: async (args, sock, jid, isGroup, sender, message) => {
-      const ctx    = getCtx(message);
+      const ctx = getCtx(message);
       const quoted = ctx?.quotedMessage;
-      const mediaMsg = quoted?.imageMessage || quoted?.videoMessage || quoted?.audioMessage || quoted?.documentMessage;
-      if (!mediaMsg) return sock.sendMessage(jid, { text: `🔗 Reply to any media with *.tourl* to get a direct URL.` });
-      await sock.sendMessage(jid, { text: `📤 Uploading media...` });
+      const mediaType = ctx?.mediaType || getMessageType(quoted);
+      const media = quoted && mediaType && /^(image|video|audio|document)Message$/.test(mediaType);
+      if (!media) return sock.sendMessage(jid, { text: '🔗 Reply to an image, video, audio, or document with *.tourl*.' });
+      await sock.sendMessage(jid, { text: '📤 Downloading and uploading your media...' });
       try {
-        const buf  = await dlQuoted(sock, jid, message, quoted);
-        const ext  = mediaMsg.imageMessage ? '.jpg' : mediaMsg.videoMessage ? '.mp4' : mediaMsg.audioMessage ? '.mp3' : '.bin';
-        const mime = mediaMsg.imageMessage ? 'image/jpeg' : mediaMsg.videoMessage ? 'video/mp4' : 'application/octet-stream';
-        const url  = await uploadToCatbox(buf, `file${ext}`, mime);
+        const buf = await dlQuoted(sock, jid, message, quoted);
+        if (!Buffer.isBuffer(buf) || !buf.length) throw new Error('WhatsApp returned an empty media file');
+        const payload = quoted[mediaType] || {};
+        const mimetype = payload.mimetype || ({
+          imageMessage: 'image/jpeg', videoMessage: 'video/mp4',
+          audioMessage: 'audio/mpeg', documentMessage: 'application/octet-stream'
+        }[mediaType] || 'application/octet-stream');
+        const rawName = payload.fileName || payload.file_name || '';
+        const ext = rawName.includes('.') ? rawName.slice(rawName.lastIndexOf('.')) :
+          ({ imageMessage: '.jpg', videoMessage: '.mp4', audioMessage: '.mp3', documentMessage: '.bin' }[mediaType] || '.bin');
+        const safeName = `kira_${Date.now()}${ext.replace(/[^.a-z0-9]/gi, '')}`;
+        const url = await uploadToPublicUrl(buf, safeName, mimetype);
         await sock.sendMessage(jid, {
-          text: `🔗 *Upload Complete!*\n\n${url}\n\n_Click the link to access your file._`
+          text: `🔗 *Upload Complete!*\n\n${url}\n\n_File type:_ ${mimetype}\n_Size:_ ${buf.length} bytes\n\n_Click the link to access your file._`
         });
       } catch (err) {
-        await sock.sendMessage(jid, { text: commandErrorMessage('upload', err, { jid }) });
+        await sock.sendMessage(jid, { text: commandErrorMessage('media upload', err, { jid }) });
       }
     }
   },

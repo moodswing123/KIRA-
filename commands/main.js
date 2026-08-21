@@ -46,29 +46,38 @@ const CATEGORY_META = {
 };
 
 function buildMainMenu(cfg, allCmds, catReg, catOrder) {
-  const prefix  = cfg?.prefix || '.';
+  const prefix = cfg?.prefix || '.';
   const botName = cfg?.name || 'KIRA-MD';
-  const owner   = cfg?.ownerName || 'Victory Tech';
+  const owner = cfg?.ownerName || 'Victory Tech';
   const ownerNumber = cfg?.ownerNumber || '';
-  const mode    = cfg?.mode || 'public';
+  const mode = String(cfg?.mode || 'public').toLowerCase();
   const modeCap = mode.charAt(0).toUpperCase() + mode.slice(1);
-  const total   = allCmds ? (allCmds.primaryNames?.length || Object.keys(allCmds).length) : 0;
-  const order   = catOrder || Object.keys(catReg);
-  const cats    = order.filter(category => catReg[category]?.length);
+  const total = allCmds ? (allCmds.primaryNames?.length || Object.keys(allCmds).length) : 0;
+  const order = catOrder || Object.keys(catReg);
+  const cats = order.filter(category => catReg[category]?.length);
+  const modeMark = mode === 'public' ? '● PUBLIC' : '◉ PRIVATE';
 
   let out =
-    `╭━━━〔 *${botName}* 〕━━━╮\n` +
-    `┃ ✦ *Advanced WhatsApp Assistant*\n` +
-    `┃\n` +
-    `┃ 👤 Owner   : ${owner}\n` +
-    `┃ ⚡ Commands: ${total}\n` +
-    `┃ ⏱ Uptime  : ${getUptime()}\n` +
-    `┃ ⌁ Prefix   : ${prefix}\n` +
-    `┃ ◈ Mode     : ${modeCap}\n` +
-    `┃ ◇ Version  : v${PKG_VERSION}\n` +
-    `╰━━━━━━━━━━━━━━━━━━━━╯\n\n` +
-    `*Quick access:* ${prefix}help <command>  •  ${prefix}ping  •  ${prefix}info\n`;
+    `╭━━━━━━━━━━━━━━━━━━━━━━╮\n` +
+    `┃   ✦ *${botName} COMMAND CENTER* ✦\n` +
+    `┃   _Your smart WhatsApp assistant_\n` +
+    `╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n` +
+    `╭─〔 *BOT PROFILE* 〕────────╮\n` +
+    `│ 👑 Owner   : ${owner}\n` +
+    `│ ⚡ Commands: ${total}\n` +
+    `│ 🔖 Prefix  : ${prefix}\n` +
+    `│ ◈ Mode     : ${modeMark}\n` +
+    `│ ⏱ Uptime   : ${getUptime()}\n` +
+    `│ ◇ Version  : v${PKG_VERSION}\n` +
+    `╰──────────────────────────╯\n\n` +
+    `╭─〔 *QUICK ACCESS* 〕───────╮\n` +
+    `│ ${prefix}menu\n` +
+    `│ ${prefix}help <command>\n` +
+    `│ ${prefix}ping\n` +
+    `│ ${prefix}info\n` +
+    `╰──────────────────────────╯\n`;
 
+  let section = 0;
   for (const category of cats) {
     const names = [...new Set(catReg[category])].sort();
     const meta = CATEGORY_META[category] || { label: category.charAt(0).toUpperCase() + category.slice(1) };
@@ -76,20 +85,26 @@ function buildMainMenu(cfg, allCmds, catReg, catOrder) {
       .map(name => ({ name, cmd: allCmds[name] }))
       .filter(({ cmd }) => cmd?.desc);
     if (!entries.length) continue;
+    section += 1;
 
-    out += `\n┌─ ${meta.label} ─────────────────\n`;
+    out += `\n╭─〔 ${String(section).padStart(2, '0')} · *${meta.label}* 〕\n`;
     for (const { name, cmd } of entries) {
-      out += `│ *${prefix}${name}* — ${cmd.desc}\n`;
+      // Keep the command itself on a dedicated line; aliases are intentionally
+      // omitted here so the menu remains clean. Use .help for full details.
+      out += `│\n│  ✧ *${prefix}${name}*\n│    ${cmd.desc}\n`;
     }
-    out += '└────────────────────────────\n';
+    out += `╰──────────────────────────╯\n`;
   }
 
   out +=
-    `\n╭━━━〔 *KIRA MD* 〕━━━╮\n` +
-    `┃ Type *${prefix}help <command>* for details\n` +
-    `┃ Support: ${ownerNumber ? `https://wa.me/${ownerNumber}` : 'Owner not configured'}\n` +
-    `╰━━━━━━━━━━━━━━━━━━━━╯\n` +
-    `_Built for reliable, professional automation._`;
+    `\n╭━━━━━━━━━━━━━━━━━━━━━━╮\n` +
+    `┃  ✦ *HOW TO USE KIRA*\n` +
+    `┃  Type a command with the prefix *${prefix}*\n` +
+    `┃  Example: *${prefix}help play*\n` +
+    `┃  Mode: *${modeCap}*\n` +
+    `┃  Support: ${ownerNumber ? `https://wa.me/${ownerNumber}` : 'Owner not configured'}\n` +
+    `╰━━━━━━━━━━━━━━━━━━━━━━╯\n` +
+    `_Professional automation • Powered by Victory Tech™_`;
   return out;
 }
 

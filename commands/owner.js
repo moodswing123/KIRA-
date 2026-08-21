@@ -25,6 +25,15 @@ function ownerOnly(exec) {
   };
 }
 
+async function applyBotMode(mode, sock, jid, botConfig) {
+  if (botConfig) botConfig.mode = mode;
+  if (global.botConfig) global.botConfig.mode = mode;
+  db.setSetting('botMode', mode);
+  await sock.sendMessage(jid, {
+    text: `🔒 Bot mode set to *${mode.toUpperCase()}*\n\n${mode === 'private' ? '🔒 Only owner can use commands.' : '🌐 Everyone can use commands.'}`
+  });
+}
+
 const ownerCommands = {
   owner: {
     category: 'general', desc: 'Show bot owner information',
@@ -142,10 +151,25 @@ const ownerCommands = {
       if (!['public', 'private'].includes(m)) {
         return sock.sendMessage(jid, { text: '❌ Usage: .mode public OR .mode private' });
       }
-      if (botConfig) botConfig.mode = m;
-      if (global.botConfig) global.botConfig.mode = m;
-      db.setSetting('botMode', m);
-      await sock.sendMessage(jid, { text: `🔒 Bot mode set to *${m.toUpperCase()}*\n\n${m === 'private' ? '🔒 Only owner can use commands.' : '🌐 Everyone can use commands.'}` });
+      await applyBotMode(m, sock, jid, botConfig);
+    })
+  },
+
+  public: {
+    category: 'owner', desc: 'Enable public mode',
+    usage: '.public', aliases: [], permissions: 'owner',
+    examples: ['.public'],
+    exec: ownerOnly(async (args, sock, jid, isGroup, sender, message, botConfig) => {
+      await applyBotMode('public', sock, jid, botConfig);
+    })
+  },
+
+  private: {
+    category: 'owner', desc: 'Enable private mode',
+    usage: '.private', aliases: [], permissions: 'owner',
+    examples: ['.private'],
+    exec: ownerOnly(async (args, sock, jid, isGroup, sender, message, botConfig) => {
+      await applyBotMode('private', sock, jid, botConfig);
     })
   },
 

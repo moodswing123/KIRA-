@@ -93,6 +93,20 @@ async function main() {
   assert((await dispatch(dm, '.ping')).some(item => /Pong/.test(item.content.text || '')), 'valid command failed');
   assert((await dispatch(dm, '.speed')).some(item => /Pong/.test(item.content.text || '')), 'alias failed');
   assert((await dispatch(dm, '.PING')).some(item => /Pong/.test(item.content.text || '')), 'uppercase command failed');
+  assert((await dispatch(dm, '.ping', { fromMe: true })).some(item => /Pong/.test(item.content.text || '')), 'owner self-command failed');
+  assert.strictEqual((await dispatch(dm, 'ordinary owner text', { fromMe: true })).length, 0, 'ordinary self-message should be ignored');
+
+  // Verify owner-controlled mode transitions and routing in DMs and groups.
+  await dispatch(owner, '.private', { fromMe: true });
+  const blockedDm = await dispatch(dm, '.ping');
+  assert(blockedDm.some(item => /private mode/i.test(item.content.text || '')), 'private mode did not block another DM user');
+  const blockedGroup = await dispatch(group, '.ping', { participant: dm });
+  assert(blockedGroup.some(item => /private mode/i.test(item.content.text || '')), 'private mode did not block another group user');
+  const ownerPrivate = await dispatch(owner, '.ping', { fromMe: true });
+  assert(ownerPrivate.some(item => /Pong/.test(item.content.text || '')), 'owner command failed in private mode');
+  await dispatch(owner, '.public', { fromMe: true });
+  assert((await dispatch(dm, '.ping')).some(item => /Pong/.test(item.content.text || '')), 'public mode did not allow another DM user');
+  assert((await dispatch(group, '.ping', { participant: dm })).some(item => /Pong/.test(item.content.text || '')), 'public mode did not allow another group user');
 
   const help = await dispatch(dm, '.help ping');
   assert(help.some(item => /Help/.test(item.content.text || '') && /\.ping/.test(item.content.text || '')), 'arguments failed');

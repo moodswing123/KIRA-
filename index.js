@@ -39,7 +39,13 @@ const botConfig = {
   name:        process.env.BOT_NAME    || 'KIRA-MD',
   version:     '1.0.0',
   prefix:      String(process.env.BOT_PREFIX || '.').trim() || '.',
-  mode:        normalizeBotMode(db.getSetting('botMode', process.env.BOT_MODE || 'public')),
+  // An explicit hosting-panel value is authoritative; persisted mode is used
+  // only when BOT_MODE is intentionally left unset.
+  mode:        normalizeBotMode(
+    Object.prototype.hasOwnProperty.call(process.env, 'BOT_MODE') && String(process.env.BOT_MODE).trim()
+      ? process.env.BOT_MODE
+      : db.getSetting('botMode', 'public')
+  ),
   ownerNumber: normalizePhoneNumber(process.env.OWNER_NUMBER),
   ownerName:   process.env.OWNER_NAME  || 'Victory Tech',
   ownerJid:    '',
@@ -219,9 +225,11 @@ async function connectToWhatsApp() {
 
     if (connection === 'open') {
       const jid = jidNormalizedUser(sock.user?.id || '');
+      botConfig.connectedJid = jid;
+      botConfig.botJid = jid;
       botConfig.ownerJid = botConfig.ownerNumber
         ? `${botConfig.ownerNumber}@s.whatsapp.net`
-        : '';
+        : jid;
       if (pairingTimer) clearTimeout(pairingTimer);
       pairingCodeDisplayed = true;
       log(`✅ Connected as ${jid}`);
@@ -317,7 +325,6 @@ async function connectToWhatsApp() {
 async function handleMessage(sock, message) {
   // ── Basic guards ──────────────────────────────────────────────────────
   if (!message?.message)        return; // no content
-  if (message.key.fromMe)       return; // bot's own messages
   if (!message.key.remoteJid)   return; // no destination
 
   const jid      = message.key.remoteJid;
@@ -331,6 +338,12 @@ async function handleMessage(sock, message) {
   debug(`MSG from ${sender} in ${jid}: "${text.slice(0, 80)}"`);
 
   if (!text) return; // no usable text
+
+  // WhatsApp marks messages sent from the linked owner account as fromMe.
+  // Allow only prefixed self-commands; ordinary bot replies are not commands
+  // and remain ignored, preventing response loops.
+  const prefix = botConfig.prefix || '.';
+  if (message.key.fromMe && !text.startsWith(prefix)) return;
 
   // ── Auto-read ─────────────────────────────────────────────────────────
   if (botConfig.ownerJid && db.getOwnerSetting(botConfig.ownerJid, 'autoRead', false)) {
@@ -381,7 +394,6 @@ async function handleMessage(sock, message) {
   }
 
   // ── Must start with prefix ─────────────────────────────────────────────
-  const prefix = botConfig.prefix || '.';
   if (!text.startsWith(prefix)) return;
 
   // ── Private-mode guard ────────────────────────────────────────────────
@@ -498,7 +510,13 @@ process.on('uncaughtException',  (e) => err('Uncaught exception', e));
 process.on('unhandledRejection', (e) => err('Unhandled rejection', e));
 
 // ── Start ─────────────────────────────────────────────────────────────────
-if (require.main === module) {
+// The generic Pterodactyl Node template may invoke .js files through
+// `ts-node --esm`. In that mode require.main !== module, so the old guard
+// silently skipped startup and the panel saw a clean exit (code 0).
+const launchedAsScript = process.argv[1]
+  ? path.resolve(process.argv[1]) === __filename
+  : false;
+if (require.main === module || launchedAsScript) {
   printBanner();
   connectToWhatsApp().catch((e) => {
     err('Fatal startup error', e);

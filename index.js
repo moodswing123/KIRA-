@@ -372,21 +372,29 @@ async function handleMessage(sock, message) {
         const isAdmin = await helpers.isGroupAdmin(sock, jid, sender).catch(() => false);
         const isOwner = helpers.resolveIsOwner(message, sender, botConfig);
         if (!isAdmin && !isOwner) {
+          // Every configured action removes the offending message first.
           try { await sock.sendMessage(jid, { delete: message.key }); } catch {}
-          const action = gs.antiLinkAction || 'warn';
-          if (action === 'kick') {
-            try { await sock.groupParticipantsUpdate(jid, [sender], 'remove'); } catch {}
-          } else {
+          const action = ['delete', 'warn', 'kick'].includes(String(gs.antiLinkAction || '').toLowerCase())
+            ? String(gs.antiLinkAction).toLowerCase()
+            : 'delete';
+
+          if (action === 'warn') {
             const count = db.addWarning(sender);
-            const max   = gs.maxWarnings || 3;
+            const max = gs.maxWarnings || 3;
             await sock.sendMessage(jid, {
               text: `🔗 @${sender.split('@')[0]} links are not allowed here! ⚠️ Warning ${count}/${max}`,
               mentions: [sender]
             }).catch(() => {});
             if (count >= max) {
-              try { await sock.groupParticipantsUpdate(jid, [sender], 'remove'); db.clearWarnings(sender); } catch {}
+              try {
+                await sock.groupParticipantsUpdate(jid, [sender], 'remove');
+                db.clearWarnings(sender);
+              } catch {}
             }
+          } else if (action === 'kick') {
+            try { await sock.groupParticipantsUpdate(jid, [sender], 'remove'); } catch {}
           }
+          // action === 'delete' intentionally stops after deleting the message.
           return;
         }
       }

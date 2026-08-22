@@ -2,7 +2,7 @@
 // commands/general.js — General utility commands for Kira MD
 const db = require('../lib/database');
 const { downloadMediaMessage } = require('@whiskeysockets/baileys');
-const { getMessageContext, commandErrorMessage } = require('../lib/helpers');
+const { getMessageContext, getMentionedJid, commandErrorMessage } = require('../lib/helpers');
 
 function getCtx(message) {
   return getMessageContext(message);
@@ -164,6 +164,43 @@ const generalCommands = {
       } catch (err) {
         await sock.sendMessage(jid, { text: commandErrorMessage('list group members', err, { jid }) });
       }
+    }
+  },
+
+  hidetag: {
+    category: 'group', desc: 'Mention all group members without displaying the tag list',
+    usage: '.hidetag [message]', aliases: ['silenttag'], permissions: 'admin',
+    chatType: 'group',
+    examples: ['.hidetag Important announcement'],
+    exec: async (args, sock, jid, isGroup) => {
+      if (!isGroup) return sock.sendMessage(jid, { text: '❌ This command only works in groups.' });
+      try {
+        const meta = await sock.groupMetadata(jid);
+        const participants = (meta.participants || []).map(p => p.id || p.jid).filter(Boolean);
+        if (!participants.length) return sock.sendMessage(jid, { text: '❌ No group members were found.' });
+        const body = args.join(' ').trim() || '⁣';
+        await sock.sendMessage(jid, { text: body, mentions: participants });
+      } catch (err) {
+        await sock.sendMessage(jid, { text: commandErrorMessage('hidetag', err, { jid }) });
+      }
+    }
+  },
+
+  device: {
+    category: 'utility', desc: 'Show the visible WhatsApp device identifier for a user',
+    usage: '.device [mention or reply]', aliases: ['checkdevice'], permissions: 'all',
+    examples: ['.device', '.device @2348012345678'],
+    exec: async (args, sock, jid, isGroup, sender, message) => {
+      const ctx = getCtx(message);
+      const target = getMentionedJid(message) || ctx?.quotedSender || sender;
+      const raw = String(target || '');
+      const match = raw.match(/:(\d+)@/);
+      const deviceId = match ? match[1] : '0';
+      const deviceType = match ? 'Companion/linked device' : 'Primary device or device ID unavailable';
+      await sock.sendMessage(jid, {
+        text: `📱 *Device Information*\n\n👤 User: @${raw.split('@')[0].split(':')[0]}\n🔢 Device ID: ${deviceId}\n💻 Type: ${deviceType}\n\n_Note: WhatsApp exposes only the device metadata available in the message JID._`,
+        mentions: target ? [target] : []
+      });
     }
   },
 

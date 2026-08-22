@@ -25,6 +25,24 @@ function ownerOnly(exec) {
   };
 }
 
+function ownerSettingsJid(botConfig, sender) {
+  return botConfig?.ownerJid || (botConfig?.ownerNumber ? `${botConfig.ownerNumber}@s.whatsapp.net` : sender);
+}
+
+function targetUserJid(args, message) {
+  const mentioned = getMentionedJid(message);
+  if (mentioned) return normalizeJid(mentioned);
+  const ctx = require('../lib/helpers').getMessageContext(message);
+  if (ctx?.quotedSender) return normalizeJid(ctx.quotedSender);
+  const digits = String(args[0] || '').replace(/\D/g, '');
+  return digits ? `${digits}@s.whatsapp.net` : '';
+}
+
+function getSudoUsers(botConfig, sender) {
+  const value = db.getOwnerSetting(ownerSettingsJid(botConfig, sender), 'sudoUsers', []);
+  return Array.isArray(value) ? value.map(normalizeJid).filter(Boolean) : [];
+}
+
 async function applyBotMode(mode, sock, jid, botConfig) {
   if (botConfig) botConfig.mode = mode;
   if (global.botConfig) global.botConfig.mode = mode;
@@ -178,6 +196,35 @@ const ownerCommands = {
     exec: ownerOnly(async (args, sock, jid) => {
       db.setSetting('menuImageUrl', '');
       await sock.sendMessage(jid, { text: '✅ Remote menu image cleared. The local menu image fallback will be used.' });
+    })
+  },
+
+  addsudo: {
+    category: 'owner', desc: 'Allow a user to use the bot while private mode is enabled',
+    usage: '.addsudo <number> (or mention/reply)', aliases: ['sudoadd'], permissions: 'owner',
+    examples: ['.addsudo 2348012345678', '.addsudo @2348012345678'],
+    exec: ownerOnly(async (args, sock, jid, isGroup, sender, message, botConfig) => {
+      const target = targetUserJid(args, message);
+      if (!target) return sock.sendMessage(jid, { text: '❌ Usage: .addsudo <number> or mention/reply to a user.' });
+      const settingsJid = ownerSettingsJid(botConfig, sender);
+      const users = getSudoUsers(botConfig, sender);
+      if (!users.includes(target)) users.push(target);
+      db.setOwnerSetting(settingsJid, 'sudoUsers', users);
+      await sock.sendMessage(jid, { text: `✅ Sudo access granted to *${target.split('@')[0]}*.` });
+    })
+  },
+
+  delsudocommands: {
+    category: 'owner', desc: 'Remove delegated private-mode access from a user',
+    usage: '.delsudocommands <number> (or mention/reply)', aliases: ['delsudocommans', 'delsudo', 'sudooff'], permissions: 'owner',
+    examples: ['.delsudocommands 2348012345678', '.delsudocommans @2348012345678'],
+    exec: ownerOnly(async (args, sock, jid, isGroup, sender, message, botConfig) => {
+      const target = targetUserJid(args, message);
+      if (!target) return sock.sendMessage(jid, { text: '❌ Usage: .delsudocommands <number> or mention/reply to a user.' });
+      const settingsJid = ownerSettingsJid(botConfig, sender);
+      const users = getSudoUsers(botConfig, sender);
+      db.setOwnerSetting(settingsJid, 'sudoUsers', users.filter(user => user !== target));
+      await sock.sendMessage(jid, { text: `✅ Sudo access removed from *${target.split('@')[0]}*.` });
     })
   },
 

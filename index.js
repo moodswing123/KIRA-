@@ -419,7 +419,10 @@ async function handleMessage(sock, message) {
   // interrupted, while making it clear to other users why their command did
   // not run.
   const isOwner = helpers.resolveIsOwner(message, sender, botConfig);
-  if (botConfig.mode === 'private' && !isOwner) {
+  const ownerSettingsJid = botConfig.ownerJid || (botConfig.ownerNumber ? `${botConfig.ownerNumber}@s.whatsapp.net` : sender);
+  const sudoUsers = db.getOwnerSetting(ownerSettingsJid, 'sudoUsers', []);
+  const isSudo = Array.isArray(sudoUsers) && sudoUsers.some(user => helpers.sameJid(user, sender));
+  if (botConfig.mode === 'private' && !isOwner && !isSudo) {
     await sock.sendMessage(jid, {
       text: '🔒 Kira MD is currently in *private mode* and can only be used by the owner.'
     });
@@ -444,6 +447,7 @@ async function handleMessage(sock, message) {
 
   const chatContext = await helpers.getChatContext(sock, message);
   chatContext.isOwner = isOwner;
+  chatContext.isSudo = isSudo;
   chatContext.messageContext = helpers.getMessageContext(message);
 
   if (!isChatTypeAllowed(handler, chatContext)) {

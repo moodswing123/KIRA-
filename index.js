@@ -33,8 +33,12 @@ function ownerContact(botConfig) {
 
 function isEmojiOnly(text) {
   const value = String(text || '').trim();
-  if (!value || value.length > 32) return false;
-  return /\p{Extended_Pictographic}/u.test(value) && /^[\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F\u200D\u20E3]+$/u.test(value);
+  if (!value || value.length > 64) return false;
+  const components = [...value];
+  const allowed = /^(?:\p{Emoji}|\p{Emoji_Component}|\p{Extended_Pictographic}|\p{Regional_Indicator}|\uFE0F|\u200D|\u20E3|[\u{E0020}-\u{E007E}]|\u{E007F})$/u;
+  const hasKeycap = /[0-9#*]\uFE0F?\u20E3/u.test(value);
+  const hasEmojiBase = /\p{Extended_Pictographic}|\p{Regional_Indicator}|\p{Emoji_Modifier}/u.test(value) || hasKeycap;
+  return hasEmojiBase && components.every(component => allowed.test(component));
 }
 
 function getViewOncePayload(quoted) {

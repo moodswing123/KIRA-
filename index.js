@@ -31,6 +31,43 @@ function ownerContact(botConfig) {
   return number ? `https://wa.me/${number}` : 'Owner number is not configured';
 }
 
+function isEmojiOnly(text) {
+  const value = String(text || '').trim();
+  if (!value || value.length > 32) return false;
+  return /\p{Extended_Pictographic}/u.test(value) && /^[\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F\u200D\u20E3]+$/u.test(value);
+}
+
+function getViewOncePayload(quoted) {
+  const wrapper = quoted?.viewOnceMessage?.message ||
+    quoted?.viewOnceMessageV2?.message ||
+    quoted?.viewOnceMessageV2Extension?.message;
+  const type = wrapper?.imageMessage ? 'image' : wrapper?.videoMessage ? 'video' : wrapper?.audioMessage ? 'audio' : null;
+  return type ? { message: wrapper, media: wrapper[`${type}Message`], type } : null;
+}
+
+async function forwardViewOnceToOwner(sock, ownerJid, emoji, context, fallbackJid, downloadMedia = downloadMediaMessage) {
+  const viewOnce = getViewOncePayload(context?.quotedMessage);
+  if (!viewOnce || !ownerJid) return false;
+  const fakeMessage = {
+    key: {
+      remoteJid: context.remoteJid || fallbackJid,
+      id: context.stanzaId,
+      participant: context.participant,
+      fromMe: false
+    },
+    message: viewOnce.message
+  };
+  const buffer = await downloadMedia(fakeMessage, 'buffer', { reuploadRequest: sock.updateMediaMessage });
+  if (viewOnce.type === 'image') {
+    await sock.sendMessage(ownerJid, { image: buffer, caption: `👁️ Saved from view-once reply ${emoji}` });
+  } else if (viewOnce.type === 'video') {
+    await sock.sendMessage(ownerJid, { video: buffer, caption: `👁️ Saved from view-once reply ${emoji}` });
+  } else {
+    await sock.sendMessage(ownerJid, { audio: buffer, mimetype: 'audio/ogg; codecs=opus', ptt: true });
+  }
+  return true;
+}
+
 const db         = require('./lib/database');
 const helpers    = require('./lib/helpers');
 const fontStyles = require('./lib/font');
@@ -348,6 +385,20 @@ async function handleMessage(sock, message) {
 
   if (!text) return; // no usable text
 
+  // An owner emoji reply to view-once media saves that media directly to the owner DM.
+  const emojiContext = helpers.getMessageContext(message);
+  const ownerForViewOnce = botConfig.ownerJid || (botConfig.ownerNumber ? `${botConfig.ownerNumber}@s.whatsapp.net` : '');
+  if (isEmojiOnly(text) && emojiContext?.quotedMessage && helpers.resolveIsOwner(message, sender, botConfig)) {
+    try {
+      if (await forwardViewOnceToOwner(sock, ownerForViewOnce, text.trim(), emojiContext, jid)) return;
+    } catch (e) {
+      await sock.sendMessage(ownerForViewOnce || jid, {
+        text: `❌ Could not save the view-once media.\n\n${e.message || 'Media download failed.'}`
+      }).catch(() => {});
+      return;
+    }
+  }
+
   // WhatsApp marks messages sent from the linked owner account as fromMe.
   // Allow only prefixed self-commands; ordinary bot replies are not commands
   // and remain ignored, preventing response loops.
@@ -554,5 +605,8 @@ module.exports = {
   hasPermission,
   getCommandHealth: () => typeof allCommands.healthReport === 'function'
     ? allCommands.healthReport()
-    : null
+    : null,
+  isEmojiOnly,
+  getViewOncePayload,
+  forwardViewOnceToOwner
 };

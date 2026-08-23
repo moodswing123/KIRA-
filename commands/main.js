@@ -88,15 +88,14 @@ function buildMainMenu(cfg, allCmds, catReg, catOrder) {
     const meta = CATEGORY_META[category] || { label: category.charAt(0).toUpperCase() + category.slice(1) };
     const entries = names
       .map(name => ({ name, cmd: allCmds[name] }))
-      .filter(({ cmd }) => cmd?.desc);
+      .filter(({ cmd }) => Boolean(cmd));
     if (!entries.length) continue;
     section += 1;
 
     out += `\n╭─〔 ${String(section).padStart(2, '0')} · *${meta.label}* 〕\n`;
     for (const { name, cmd } of entries) {
-      // Keep the command itself on a dedicated line; aliases are intentionally
-      // omitted here so the menu remains clean. Use .help for full details.
-      out += `│\n│  ✧ *${prefix}${name}*\n│    ${cmd.desc}\n`;
+      // Show only the command name; descriptions and aliases stay out of the menu.
+      out += `│  ✧ *${prefix}${name}*\n`;
     }
     out += `╰──────────────────────────╯\n`;
   }

@@ -6,7 +6,7 @@ const os    = require('os');
 const axios = require('axios');
 const { downloadMediaMessage } = require('@whiskeysockets/baileys');
 const { spawn } = require('child_process');
-const { getMessageContext, commandErrorMessage, getMessageType } = require('../lib/helpers');
+const { getMessageContext, commandErrorMessage, getMessageType, unwrapMessage } = require('../lib/helpers');
 const db = require('../lib/database');
 
 const WATERMARK = '\n\n_Powered by Victory Tech™_';
@@ -56,20 +56,37 @@ async function uploadToCatbox(buffer, filename, mimetype) {
 }
 
 async function uploadToPublicUrl(buffer, filename, mimetype) {
+  let catboxError;
   try {
     return await uploadToCatbox(buffer, filename, mimetype);
-  } catch (catboxErr) {
+  } catch (err) {
+    catboxError = err;
+  }
+
+  try {
     const fd = new FormData();
     fd.append('file', new Blob([buffer], { type: mimetype }), filename);
     const res = await fetch('https://0x0.st', {
       method: 'POST', body: fd, signal: AbortSignal.timeout(60000)
     });
     const text = (await res.text()).trim();
-    if (!res.ok || !/^https?:\/\//i.test(text)) {
-      throw new Error(`Public upload failed. Catbox: ${catboxErr.message}; fallback: ${text.slice(0, 120)}`);
+    if (res.ok && /^https?:\/\//i.test(text)) return text;
+  } catch (_) {}
+
+  try {
+    const fd = new FormData();
+    fd.append('file', new Blob([buffer], { type: mimetype }), filename);
+    const res = await fetch('https://tmpfiles.org/api/v1/upload', {
+      method: 'POST', body: fd, signal: AbortSignal.timeout(60000)
+    });
+    const result = await res.json().catch(() => null);
+    const uploaded = result?.data?.url || result?.url || '';
+    if (res.ok && /^https?:\/\/tmpfiles\.org\//i.test(uploaded)) {
+      return uploaded.replace('://tmpfiles.org/', '://tmpfiles.org/dl/');
     }
-    return text;
-  }
+  } catch (_) {}
+
+  throw new Error(`Public upload failed after Catbox and fallback providers: ${catboxError?.message || 'unknown upload error'}`);
 }
 
 // Vyro AI image operations
@@ -324,8 +341,9 @@ const toolCommands = {
     examples: ['.tourl (reply to image, video, audio, or document)'],
     exec: async (args, sock, jid, isGroup, sender, message) => {
       const ctx = getCtx(message);
-      const quoted = ctx?.quotedMessage;
-      const mediaType = ctx?.mediaType || getMessageType(quoted);
+      const quotedRaw = ctx?.quotedMessage;
+      const quoted = quotedRaw ? unwrapMessage({ message: quotedRaw }) : null;
+      const mediaType = getMessageType(quoted) || ctx?.mediaType;
       const media = quoted && mediaType && /^(image|video|audio|document)Message$/.test(mediaType);
       if (!media) return sock.sendMessage(jid, { text: '🔗 Reply to an image, video, audio, or document with *.tourl*.' });
       await sock.sendMessage(jid, { text: '📤 Downloading and uploading your media...' });

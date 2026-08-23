@@ -106,18 +106,44 @@ Need help? Contact the owner directly:
 
 ## ⚙️ Environment Variables
 
-| Variable | Description | Default |
-|----------|-------------|---------|
+Copy `.env.example` to `.env`, then fill in the values you need. Keep the `.env` file private and never commit real API keys to GitHub.
+
+### Bot and owner settings
+
+| Variable | Description | Required/default |
+|----------|-------------|------------------|
 | `BOT_NAME` | Bot display name | `KIRA-MD` |
 | `BOT_PREFIX` | Command prefix | `.` |
 | `BOT_MODE` | `public` or `private` | `public` |
-| `OWNER_NUMBER` | Your WhatsApp number | (required) |
-| `OWNER_NAME` | Your name | `Victory Tech` |
-| `OPENAI_API_KEY` | OpenAI key (optional) | — |
-| `ANTHROPIC_API_KEY` | Claude key (optional) | — |
-| `GOOGLE_AI_API_KEY` | Gemini key (optional) | — |
+| `OWNER_NUMBER` | WhatsApp owner number with country code and digits only | Required for owner commands |
+| `OWNER_NAME` | Owner display name | `Victory Tech` |
 
-> 💡 AI commands work without API keys using the free Pollinations.ai service.
+### GPT and AI providers
+
+| Variable | Used by | Required |
+|----------|---------|----------|
+| `OPENAI_API_KEY` | `.gpt`, `.gpt4`, and automatic AI provider selection | Optional |
+| `OPEN_API_KEY` | Legacy alias for OpenAI when `OPENAI_API_KEY` is empty | Optional |
+| `ANTHROPIC_API_KEY` | `.claude` | Optional |
+| `GOOGLE_AI_API_KEY` | `.gemini` | Optional |
+| `GEMINI_MODEL` | Optional Gemini model override | Optional; built-in default |
+
+### Download and search providers
+
+| Variable | Used by | Required |
+|----------|---------|----------|
+| `ZSTLAB_API_KEY` | ZSTLAB-backed YouTube, social-media, Spotify, MediaFire, Pinterest, and search/download routes | Optional |
+
+Most downloader commands also have public-service, Cobalt, TikWM, HTML-extraction, or local `yt-dlp` fallbacks. Therefore, a missing `ZSTLAB_API_KEY` does not necessarily prevent every download command from working, but it disables the ZSTLAB route.
+
+### Optional image-processing providers
+
+| Variable | Used by | Required |
+|----------|---------|----------|
+| `REMOVE_BG_API_KEY` | Background-removal provider | Optional |
+| `PHOTOROOM_API_KEY` | Background-removal fallback provider | Optional |
+
+> AI commands can fall back to the free Pollinations.ai service when a supported provider key is unavailable, subject to that service’s availability and limits.
 
 ---
 

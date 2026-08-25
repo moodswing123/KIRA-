@@ -337,7 +337,7 @@ const toolCommands = {
 
   tourl: {
     category: 'utility', desc: 'Upload replied media and return a public URL',
-    usage: '.tourl', aliases: ['upload', 'getlink'], permissions: 'all',
+    usage: '.tourl', aliases: ['url', 'upload', 'getlink'], permissions: 'all',
     examples: ['.tourl (reply to image, video, audio, or document)'],
     exec: async (args, sock, jid, isGroup, sender, message) => {
       const ctx = getCtx(message);

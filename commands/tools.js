@@ -125,6 +125,39 @@ function vyroAiRequest(imageBuffer, operation) {
   });
 }
 
+async function handleMediaUrl(args, sock, jid, isGroup, sender, message, forceCatbox = false) {
+  const ctx = getCtx(message);
+  const quotedRaw = ctx?.quotedMessage;
+  const quoted = quotedRaw ? unwrapMessage({ message: quotedRaw }) : null;
+  const mediaType = getMessageType(quoted) || ctx?.mediaType;
+  const media = quoted && mediaType && /^(image|video|audio|document)Message$/.test(mediaType);
+  const commandLabel = forceCatbox ? '*.url*' : '*.tourl*';
+  if (!media) return sock.sendMessage(jid, { text: `🔗 Reply to an image, video, audio, or document with ${commandLabel}.` });
+  await sock.sendMessage(jid, { text: '📤 Downloading and uploading your media...' });
+  try {
+    const buf = await dlQuoted(sock, jid, message, quoted);
+    if (!Buffer.isBuffer(buf) || !buf.length) throw new Error('WhatsApp returned an empty media file');
+    const payload = quoted[mediaType] || {};
+    const mimetype = payload.mimetype || ({
+      imageMessage: 'image/jpeg', videoMessage: 'video/mp4',
+      audioMessage: 'audio/mpeg', documentMessage: 'application/octet-stream'
+    }[mediaType] || 'application/octet-stream');
+    const rawName = payload.fileName || payload.file_name || '';
+    const ext = rawName.includes('.') ? rawName.slice(rawName.lastIndexOf('.')) :
+      ({ imageMessage: '.jpg', videoMessage: '.mp4', audioMessage: '.mp3', documentMessage: '.bin' }[mediaType] || '.bin');
+    const safeName = `kira_${Date.now()}${ext.replace(/[^.a-z0-9]/gi, '')}`;
+    const url = forceCatbox
+      ? await uploadToCatbox(buf, safeName, mimetype)
+      : await uploadToPublicUrl(buf, safeName, mimetype);
+    await sock.sendMessage(jid, {
+      text: `🔗 *Upload Complete!*\n\n${url}\n\n_File type:_ ${mimetype}\n_Size:_ ${buf.length} bytes\n\n_Click the link to access your file._`
+    });
+  } catch (err) {
+    const prefix = forceCatbox ? 'Catbox media upload' : 'media upload';
+    await sock.sendMessage(jid, { text: commandErrorMessage(prefix, err, { jid }) });
+  }
+}
+
 const toolCommands = {
   enhance: {
     category: 'sticker', desc: 'Enhance image quality using AI (reply to image)',
@@ -335,38 +368,18 @@ const toolCommands = {
     }
   },
 
+  url: {
+    category: 'utility', desc: 'Upload replied media to Catbox and return its URL',
+    usage: '.url', aliases: [], permissions: 'all',
+    examples: ['.url (reply to image, video, audio, or document)'],
+    exec: async (args, sock, jid, isGroup, sender, message) => handleMediaUrl(args, sock, jid, isGroup, sender, message, true)
+  },
+
   tourl: {
     category: 'utility', desc: 'Upload replied media and return a public URL',
-    usage: '.tourl', aliases: ['url', 'upload', 'getlink'], permissions: 'all',
+    usage: '.tourl', aliases: ['upload', 'getlink'], permissions: 'all',
     examples: ['.tourl (reply to image, video, audio, or document)'],
-    exec: async (args, sock, jid, isGroup, sender, message) => {
-      const ctx = getCtx(message);
-      const quotedRaw = ctx?.quotedMessage;
-      const quoted = quotedRaw ? unwrapMessage({ message: quotedRaw }) : null;
-      const mediaType = getMessageType(quoted) || ctx?.mediaType;
-      const media = quoted && mediaType && /^(image|video|audio|document)Message$/.test(mediaType);
-      if (!media) return sock.sendMessage(jid, { text: '🔗 Reply to an image, video, audio, or document with *.tourl*.' });
-      await sock.sendMessage(jid, { text: '📤 Downloading and uploading your media...' });
-      try {
-        const buf = await dlQuoted(sock, jid, message, quoted);
-        if (!Buffer.isBuffer(buf) || !buf.length) throw new Error('WhatsApp returned an empty media file');
-        const payload = quoted[mediaType] || {};
-        const mimetype = payload.mimetype || ({
-          imageMessage: 'image/jpeg', videoMessage: 'video/mp4',
-          audioMessage: 'audio/mpeg', documentMessage: 'application/octet-stream'
-        }[mediaType] || 'application/octet-stream');
-        const rawName = payload.fileName || payload.file_name || '';
-        const ext = rawName.includes('.') ? rawName.slice(rawName.lastIndexOf('.')) :
-          ({ imageMessage: '.jpg', videoMessage: '.mp4', audioMessage: '.mp3', documentMessage: '.bin' }[mediaType] || '.bin');
-        const safeName = `kira_${Date.now()}${ext.replace(/[^.a-z0-9]/gi, '')}`;
-        const url = await uploadToPublicUrl(buf, safeName, mimetype);
-        await sock.sendMessage(jid, {
-          text: `🔗 *Upload Complete!*\n\n${url}\n\n_File type:_ ${mimetype}\n_Size:_ ${buf.length} bytes\n\n_Click the link to access your file._`
-        });
-      } catch (err) {
-        await sock.sendMessage(jid, { text: commandErrorMessage('media upload', err, { jid }) });
-      }
-    }
+    exec: async (args, sock, jid, isGroup, sender, message) => handleMediaUrl(args, sock, jid, isGroup, sender, message, false)
   },
 
   screenshot: {

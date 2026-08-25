@@ -46,6 +46,8 @@ function ffmpegRun(inputPath, outputPath, extraArgs = []) {
 async function uploadToCatbox(buffer, filename, mimetype) {
   const fd = new FormData();
   fd.append('reqtype', 'fileupload');
+  const userhash = String(process.env.CATBOX_USERHASH || '').trim();
+  if (userhash) fd.append('userhash', userhash);
   fd.append('fileToUpload', new Blob([buffer], { type: mimetype }), filename);
   const res = await fetch('https://catbox.moe/user/api.php', {
     method: 'POST', body: fd, signal: AbortSignal.timeout(60000)

@@ -412,17 +412,39 @@ async function connectToWhatsApp() {
 
   // ── Incoming messages ──────────────────────────────────────────────────
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
+    const batch = Array.isArray(messages) ? messages : [];
+    log(`UPSERT batch type=${type || 'unknown'} count=${batch.length}`);
+
     // Cache every event type first. Outgoing owner messages can arrive as `append`,
     // while the later native reaction usually arrives as `notify`.
-    for (const message of messages) {
+    for (const [index, message] of batch.entries()) {
+      const raw = message?.message || {};
+      const keys = Object.keys(raw);
+      const keyText = keys.join(',') || 'none';
+      const contextInfo = raw.extendedTextMessage?.contextInfo ||
+        raw.imageMessage?.contextInfo || raw.videoMessage?.contextInfo ||
+        raw.audioMessage?.contextInfo || raw.documentMessage?.contextInfo ||
+        raw.ephemeralMessage?.message?.extendedTextMessage?.contextInfo || null;
+      const reaction = findReactionMessage(message);
+      const hasViewOnce = /viewOnce|viewOnceMessageV2Extension/i.test(keyText) ||
+        Boolean(raw.ephemeralMessage?.message && /viewOnce|viewOnceMessageV2Extension/i.test(Object.keys(raw.ephemeralMessage.message).join(',')));
+      const hasQuoted = Boolean(contextInfo?.quotedMessage);
+      const hasReaction = Boolean(reaction);
+      const jid = message?.key?.remoteJid || 'unknown';
+      const participant = message?.key?.participant || message?.participant || '';
+      log(`UPSERT item=${index} type=${type || 'unknown'} id=${message?.key?.id || 'unknown'} fromMe=${Boolean(message?.key?.fromMe)} chat=${jid} participant=${participant || 'none'} keys=${keyText} quoted=${hasQuoted} reaction=${hasReaction} reactionText=${hasReaction ? Boolean(reaction.text) : false} viewOnce=${hasViewOnce}`);
+
       if (message.key?.remoteJid && message.key?.id && message.message) {
         cacheMsg(message.key.remoteJid, message.key.id, message.message);
       }
     }
-    // `notify` = new messages pushed to device; history events are cache-only.
-    if (type !== 'notify') return;
 
-    for (const message of messages) {
+    // `notify` = new messages pushed to device; history events are cache-only.
+    const shouldDispatch = type === 'notify';
+    log(`UPSERT dispatch=${shouldDispatch ? 'yes' : 'cache-only'} type=${type || 'unknown'}`);
+    if (!shouldDispatch) return;
+
+    for (const message of batch) {
       try {
         await handleMessage(sock, message);
       } catch (e) {

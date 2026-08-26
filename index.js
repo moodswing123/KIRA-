@@ -112,7 +112,15 @@ function getEmojiReplyContext(message) {
 
 async function forwardViewOnceToOwner(sock, ownerJid, emoji, context, fallbackJid, downloadMedia = downloadMediaMessage) {
   const viewOnce = getViewOncePayload(context?.quotedMessage);
-  if (!viewOnce || !ownerJid) return false;
+  if (!viewOnce) {
+    log('VIEW-ONCE save skipped: quoted message has no supported view-once wrapper/media');
+    return false;
+  }
+  if (!ownerJid) {
+    log('VIEW-ONCE save skipped: owner DM JID is unavailable');
+    return false;
+  }
+  log(`VIEW-ONCE save start type=${viewOnce.type} target=${context.remoteJid || fallbackJid}:${context.stanzaId || 'unknown'}`);
   const fakeMessage = {
     key: {
       remoteJid: context.remoteJid || fallbackJid,
@@ -123,6 +131,7 @@ async function forwardViewOnceToOwner(sock, ownerJid, emoji, context, fallbackJi
     message: viewOnce.message
   };
   const buffer = await downloadMedia(fakeMessage, 'buffer', { reuploadRequest: sock.updateMediaMessage });
+  log(`VIEW-ONCE media downloaded type=${viewOnce.type} bytes=${buffer?.length || 0}`);
   if (viewOnce.type === 'image') {
     await sock.sendMessage(ownerJid, { image: buffer, caption: `👁️ Saved from view-once reply ${emoji}` });
   } else if (viewOnce.type === 'video') {
@@ -130,6 +139,7 @@ async function forwardViewOnceToOwner(sock, ownerJid, emoji, context, fallbackJi
   } else {
     await sock.sendMessage(ownerJid, { audio: buffer, mimetype: 'audio/ogg; codecs=opus', ptt: true });
   }
+  log(`VIEW-ONCE forwarded to owner=${ownerJid} type=${viewOnce.type}`);
   return true;
 }
 
@@ -439,9 +449,22 @@ async function connectToWhatsApp() {
       }
     }
 
-    // `notify` = new messages pushed to device; history events are cache-only.
-    const shouldDispatch = type === 'notify';
-    log(`UPSERT dispatch=${shouldDispatch ? 'yes' : 'cache-only'} type=${type || 'unknown'}`);
+    // New messages are normally `notify`, but replies composed on the linked
+    // owner device may arrive as `append`. Dispatch only relevant append
+    // events so history replay does not execute ordinary commands.
+    const hasRelevantContext = batch.some((message) => {
+      const raw = message?.message || {};
+      const quoted = Boolean(
+        raw.extendedTextMessage?.contextInfo?.quotedMessage ||
+        raw.imageMessage?.contextInfo?.quotedMessage ||
+        raw.videoMessage?.contextInfo?.quotedMessage ||
+        raw.audioMessage?.contextInfo?.quotedMessage ||
+        raw.ephemeralMessage?.message?.extendedTextMessage?.contextInfo?.quotedMessage
+      );
+      return quoted || Boolean(findReactionMessage(message));
+    });
+    const shouldDispatch = type === 'notify' || hasRelevantContext;
+    log(`UPSERT dispatch=${shouldDispatch ? 'yes' : 'cache-only'} type=${type || 'unknown'} relevantContext=${hasRelevantContext}`);
     if (!shouldDispatch) return;
 
     for (const message of batch) {

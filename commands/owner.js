@@ -11,6 +11,22 @@ const {
   commandErrorMessage
 } = require('../lib/helpers');
 
+async function resolveDirectImageUrl(url) {
+  const response = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(15000) });
+  const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+  if (response.ok && contentType.startsWith('image/')) return url;
+  const html = await response.text();
+  const match = html.match(/https?:\/\/tmpfiles\.org\/dl\/[^"'<>\s]+/i);
+  if (!match) throw new Error(`URL returned ${response.status || 'an invalid response'}${contentType ? ` (${contentType})` : ''}`);
+  const direct = match[0];
+  const directResponse = await fetch(direct, { method: 'GET', signal: AbortSignal.timeout(15000) });
+  const directType = String(directResponse.headers.get('content-type') || '').toLowerCase();
+  if (!directResponse.ok || !directType.startsWith('image/')) {
+    throw new Error(`Resolved URL returned ${directResponse.status || 'an invalid response'}${directType ? ` (${directType})` : ''}`);
+  }
+  return direct;
+}
+
 function ownerOnly(exec) {
   return async (args, sock, jid, isGroup, sender, message, botConfig) => {
     if (resolveIsOwner(message, sender, botConfig)) {
@@ -172,14 +188,10 @@ const ownerCommands = {
         });
       }
       try {
-        const response = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(15000) });
-        const contentType = String(response.headers.get('content-type') || '').toLowerCase();
-        if (!response.ok || !contentType.startsWith('image/')) {
-          throw new Error(`URL returned ${response.status || 'an invalid response'}${contentType ? ` (${contentType})` : ''}`);
-        }
-        db.setSetting('menuImageUrl', url);
+        const directUrl = await resolveDirectImageUrl(url);
+        db.setSetting('menuImageUrl', directUrl);
         await sock.sendMessage(jid, {
-          text: `✅ *Menu image updated.*\n\n${url}\n\nUse *.menu* to preview it. The setting will survive restarts.`
+          text: `✅ *Menu image updated.*\n\n${directUrl}\n\nUse *.menu* to preview it. The setting will survive restarts.`
         });
       } catch (err) {
         await sock.sendMessage(jid, {

@@ -75,6 +75,28 @@ function getViewOncePayload(quoted) {
   return type ? { message: current, media: current[`${type}Message`], type } : null;
 }
 
+function getEmojiReplyContext(message) {
+  const context = helpers.getMessageContext(message);
+  if (context?.quotedMessage) return context;
+
+  const reaction = message?.message?.reactionMessage;
+  const targetKey = reaction?.key;
+  if (!reaction?.text || !targetKey?.id) return null;
+  const remoteJid = targetKey.remoteJid || message?.key?.remoteJid || '';
+  const quotedMessage = msgCache.get(`${remoteJid}:${targetKey.id}`);
+  if (!quotedMessage) return null;
+  return {
+    quotedMessage,
+    quotedSender: targetKey.participant || '',
+    quotedParticipant: targetKey.participant || '',
+    stanzaId: targetKey.id,
+    participant: targetKey.participant || '',
+    remoteJid,
+    quotedKey: targetKey,
+    mediaType: helpers.getMessageType ? helpers.getMessageType(quotedMessage) : null
+  };
+}
+
 async function forwardViewOnceToOwner(sock, ownerJid, emoji, context, fallbackJid, downloadMedia = downloadMediaMessage) {
   const viewOnce = getViewOncePayload(context?.quotedMessage);
   if (!viewOnce || !ownerJid) return false;
@@ -416,7 +438,7 @@ async function handleMessage(sock, message) {
   if (!text) return; // no usable text
 
   // An owner emoji reply to view-once media saves that media directly to the owner DM.
-  const emojiContext = helpers.getMessageContext(message);
+  const emojiContext = getEmojiReplyContext(message);
   const ownerForViewOnce = botConfig.ownerJid || (botConfig.ownerNumber ? `${botConfig.ownerNumber}@s.whatsapp.net` : '');
   if (isEmojiOnly(text) && emojiContext?.quotedMessage && helpers.resolveIsOwner(message, sender, botConfig)) {
     try {
@@ -638,5 +660,7 @@ module.exports = {
     : null,
   isEmojiOnly,
   getViewOncePayload,
+  getEmojiReplyContext,
+  cacheMsg,
   forwardViewOnceToOwner
 };

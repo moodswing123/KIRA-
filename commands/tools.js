@@ -57,6 +57,16 @@ async function uploadToCatbox(buffer, filename, mimetype) {
   return text;
 }
 
+async function resolveTmpfilesDirectUrl(url) {
+  const res = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(15000) });
+  const contentType = String(res.headers.get('content-type') || '').toLowerCase();
+  if (res.ok && contentType.startsWith('image/')) return url;
+  const html = await res.text();
+  const match = html.match(/https?:\/\/tmpfiles\.org\/dl\/[^"'<>\s]+/i);
+  if (!match) throw new Error('tmpfiles returned a landing page without a direct download URL');
+  return match[0];
+}
+
 async function uploadToPublicUrl(buffer, filename, mimetype) {
   let catboxError;
   try {
@@ -84,7 +94,8 @@ async function uploadToPublicUrl(buffer, filename, mimetype) {
     const result = await res.json().catch(() => null);
     const uploaded = result?.data?.url || result?.url || '';
     if (res.ok && /^https?:\/\/tmpfiles\.org\//i.test(uploaded)) {
-      return uploaded.replace('://tmpfiles.org/', '://tmpfiles.org/dl/');
+      const normalized = uploaded.replace('://tmpfiles.org/', '://tmpfiles.org/dl/');
+      return await resolveTmpfilesDirectUrl(normalized);
     }
   } catch (_) {}
 

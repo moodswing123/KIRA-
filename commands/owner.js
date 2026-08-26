@@ -162,13 +162,13 @@ const ownerCommands = {
 
   setmenuimage: {
     category: 'owner', desc: 'Set the remote image used by the menu',
-    usage: '.setmenuimage <https image URL>', aliases: ['menuimage'], permissions: 'owner',
-    examples: ['.setmenuimage https://files.catbox.moe/example.jpg'],
+    usage: '.setmenuimage <image URL>', aliases: ['menuimage'], permissions: 'owner',
+    examples: ['.setmenuimage https://example.com/menu.jpg'],
     exec: ownerOnly(async (args, sock, jid) => {
       const url = String(args[0] || '').trim();
-      if (!/^https:\/\/[^\s]+$/i.test(url)) {
+      if (!/^https?:\/\/[^\s]+$/i.test(url)) {
         return sock.sendMessage(jid, {
-          text: '❌ Usage: .setmenuimage <https image URL>\n\nUse a direct Catbox URL such as https://files.catbox.moe/example.jpg'
+          text: '❌ Usage: .setmenuimage <http(s) image URL>\n\nThe link may be hosted anywhere, but it must point directly to an image file.'
         });
       }
       try {
@@ -183,9 +183,46 @@ const ownerCommands = {
         });
       } catch (err) {
         await sock.sendMessage(jid, {
-          text: `❌ That URL could not be validated as a direct image.\n\n${err.message}\n\nUse the Catbox file URL, not the Catbox upload page.`
+          text: `❌ That link could not be validated as a direct image.\n\n${err.message}\n\nUse the direct image file URL, not an HTML page or gallery link.`
         });
       }
+    })
+  },
+
+  setmenuvideo: {
+    category: 'owner', desc: 'Set the remote video used by the menu',
+    usage: '.setmenuvideo <video URL>', aliases: ['menuvideo'], permissions: 'owner',
+    examples: ['.setmenuvideo https://example.com/menu.mp4'],
+    exec: ownerOnly(async (args, sock, jid) => {
+      const url = String(args[0] || '').trim();
+      if (!/^https?:\/\/[^\s]+$/i.test(url)) {
+        return sock.sendMessage(jid, { text: '❌ Usage: .setmenuvideo <http(s) video URL>' });
+      }
+      try {
+        const response = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(15000) });
+        const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+        if (!response.ok || !contentType.startsWith('video/')) {
+          throw new Error(`URL returned ${response.status || 'an invalid response'}${contentType ? ` (${contentType})` : ''}`);
+        }
+        db.setSetting('menuVideoUrl', url);
+        await sock.sendMessage(jid, {
+          text: `✅ *Menu video updated.*\n\n${url}\n\nUse *.menu* to preview it. The setting will survive restarts.`
+        });
+      } catch (err) {
+        await sock.sendMessage(jid, {
+          text: `❌ That link could not be validated as a direct video.\n\n${err.message}\n\nUse a direct video file URL, not an HTML page.`
+        });
+      }
+    })
+  },
+
+  clearmenuvideo: {
+    category: 'owner', desc: 'Remove the remote menu video',
+    usage: '.clearmenuvideo', aliases: ['resetmenuvideo'], permissions: 'owner',
+    examples: ['.clearmenuvideo'],
+    exec: ownerOnly(async (args, sock, jid) => {
+      db.setSetting('menuVideoUrl', '');
+      await sock.sendMessage(jid, { text: '✅ Remote menu video cleared. The menu image or local fallback will be used.' });
     })
   },
 

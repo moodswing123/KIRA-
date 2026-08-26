@@ -10,7 +10,12 @@ const LOCAL_MENU_IMAGE_PATH = fs.existsSync(MENU_IMAGE_PNG) ? MENU_IMAGE_PNG : (
 
 function getMenuImageUrl() {
   const value = db.getSetting('menuImageUrl', '');
-  return /^https:\/\/[^\s]+$/i.test(String(value || '').trim()) ? String(value).trim() : '';
+  return /^https?:\/\/[^\s]+$/i.test(String(value || '').trim()) ? String(value).trim() : '';
+}
+
+function getMenuVideoUrl() {
+  const value = db.getSetting('menuVideoUrl', '');
+  return /^https?:\/\/[^\s]+$/i.test(String(value || '').trim()) ? String(value).trim() : '';
 }
 
 let PKG_VERSION = '1.0.0';
@@ -124,8 +129,15 @@ const mainCommands = {
       const catOrder = allCmds.CATEGORY_ORDER || [];
       const text    = buildMainMenu(cfg, allCmds, catReg, catOrder);
 
+      const remoteVideo = getMenuVideoUrl();
       const remoteImage = getMenuImageUrl();
-      if (remoteImage) {
+      if (remoteVideo) {
+        await sock.sendMessage(jid, {
+          video:   { url: remoteVideo },
+          caption: text,
+          mimetype: 'video/mp4'
+        });
+      } else if (remoteImage) {
         await sock.sendMessage(jid, {
           image:   { url: remoteImage },
           caption: text

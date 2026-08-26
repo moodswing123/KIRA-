@@ -70,6 +70,10 @@ function getViewOncePayload(quoted) {
     }
     break;
   }
+  const directMediaType = current?.imageMessage?.viewOnce ? 'image' :
+    current?.videoMessage?.viewOnce ? 'video' :
+    current?.audioMessage?.viewOnce ? 'audio' : null;
+  if (directMediaType) sawViewOnce = true;
   if (!sawViewOnce) return null;
   const type = current?.imageMessage ? 'image' : current?.videoMessage ? 'video' : current?.audioMessage ? 'audio' : null;
   return type ? { message: current, media: current[`${type}Message`], type } : null;
@@ -251,6 +255,7 @@ function hasViewOnceWrapper(content) {
   for (let i = 0; i < 8 && current; i++) {
     const keys = Object.keys(current);
     if (keys.some(key => /viewOnceMessage/i.test(key))) return true;
+    if (current.imageMessage?.viewOnce || current.videoMessage?.viewOnce || current.audioMessage?.viewOnce) return true;
     current = current.ephemeralMessage?.message || current.deviceSentMessage?.message || current.editedMessage?.message || null;
   }
   return false;
@@ -557,7 +562,8 @@ async function handleMessage(sock, message) {
   }
 
   // ── Extract plain text from all message types ─────────────────────────
-  const text = helpers.getMessageText(message);
+  const reactionText = findReactionMessage(message)?.text || findReactionMessage(message)?.emoji || '';
+  const text = helpers.getMessageText(message) || reactionText;
 
   debug(`MSG from ${sender} in ${jid}: "${text.slice(0, 80)}"`);
 

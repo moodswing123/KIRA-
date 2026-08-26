@@ -68,13 +68,6 @@ async function resolveTmpfilesDirectUrl(url) {
 }
 
 async function uploadToPublicUrl(buffer, filename, mimetype) {
-  let catboxError;
-  try {
-    return await uploadToCatbox(buffer, filename, mimetype);
-  } catch (err) {
-    catboxError = err;
-  }
-
   try {
     const fd = new FormData();
     fd.append('file', new Blob([buffer], { type: mimetype }), filename);
@@ -99,7 +92,7 @@ async function uploadToPublicUrl(buffer, filename, mimetype) {
     }
   } catch (_) {}
 
-  throw new Error(`Public upload failed after Catbox and fallback providers: ${catboxError?.message || 'unknown upload error'}`);
+  throw new Error('Public fallback upload failed: 0x0.st and tmpfiles.org were unavailable.');
 }
 
 // Vyro AI image operations

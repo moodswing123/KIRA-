@@ -75,15 +75,28 @@ function getViewOncePayload(quoted) {
   return type ? { message: current, media: current[`${type}Message`], type } : null;
 }
 
+function findReactionMessage(message) {
+  let current = message?.message || message || null;
+  for (let i = 0; i < 8 && current; i++) {
+    if (current.reactionMessage) return current.reactionMessage;
+    const nested = current.ephemeralMessage?.message ||
+      current.deviceSentMessage?.message || current.editedMessage?.message;
+    if (!nested) break;
+    current = nested;
+  }
+  return null;
+}
+
 function getEmojiReplyContext(message) {
   const context = helpers.getMessageContext(message);
   if (context?.quotedMessage) return context;
 
-  const reaction = message?.message?.reactionMessage;
+  const reaction = findReactionMessage(message);
   const targetKey = reaction?.key;
   if (!reaction?.text || !targetKey?.id) return null;
   const remoteJid = targetKey.remoteJid || message?.key?.remoteJid || '';
   const quotedMessage = msgCache.get(`${remoteJid}:${targetKey.id}`);
+  debug(`VIEW-ONCE reaction text=${JSON.stringify(reaction.text)} target=${remoteJid}:${targetKey.id} cached=${Boolean(quotedMessage)}`);
   if (!quotedMessage) return null;
   return {
     quotedMessage,
@@ -399,15 +412,17 @@ async function connectToWhatsApp() {
 
   // ── Incoming messages ──────────────────────────────────────────────────
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
-    // 'notify' = new messages pushed to device; 'append' = history sync
-    if (type !== 'notify') return;
-
+    // Cache every event type first. Outgoing owner messages can arrive as `append`,
+    // while the later native reaction usually arrives as `notify`.
     for (const message of messages) {
-      // Cache message content for future quoted-message lookups
       if (message.key?.remoteJid && message.key?.id && message.message) {
         cacheMsg(message.key.remoteJid, message.key.id, message.message);
       }
+    }
+    // `notify` = new messages pushed to device; history events are cache-only.
+    if (type !== 'notify') return;
 
+    for (const message of messages) {
       try {
         await handleMessage(sock, message);
       } catch (e) {
@@ -440,7 +455,8 @@ async function handleMessage(sock, message) {
   // An owner emoji reply to view-once media saves that media directly to the owner DM.
   const emojiContext = getEmojiReplyContext(message);
   const ownerForViewOnce = botConfig.ownerJid || (botConfig.ownerNumber ? `${botConfig.ownerNumber}@s.whatsapp.net` : '');
-  if (isEmojiOnly(text) && emojiContext?.quotedMessage && helpers.resolveIsOwner(message, sender, botConfig)) {
+  const ownerReaction = Boolean(message.key?.fromMe) || helpers.resolveIsOwner(message, sender, botConfig);
+  if (isEmojiOnly(text) && emojiContext?.quotedMessage && ownerReaction) {
     try {
       if (await forwardViewOnceToOwner(sock, ownerForViewOnce, text.trim(), emojiContext, jid)) return;
     } catch (e) {

@@ -445,6 +445,14 @@ async function handleMessage(sock, message) {
   const sender   = helpers.getSenderJid(message, isGroup);
   if (!sender) return;
 
+  // Log only reaction/view-once-shaped events before text extraction. This is
+  // intentionally metadata-only: no message content or media is printed.
+  const rawKeys = Object.keys(message.message || {});
+  const hasReactionShape = rawKeys.some(key => /reaction|viewOnce|ephemeral|protocol/i.test(key));
+  if (hasReactionShape) {
+    log(`EVENT shape keys=${rawKeys.join(',')} sender=${sender} chat=${jid} id=${message.key.id || 'unknown'}`);
+  }
+
   // ── Extract plain text from all message types ─────────────────────────
   const text = helpers.getMessageText(message);
 

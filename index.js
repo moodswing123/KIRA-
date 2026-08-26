@@ -79,8 +79,25 @@ function findReactionMessage(message) {
   let current = message?.message || message || null;
   for (let i = 0; i < 8 && current; i++) {
     if (current.reactionMessage) return current.reactionMessage;
+    const protocol = current.protocolMessage;
+    if (protocol?.reactionMessage) return protocol.reactionMessage;
+    if (protocol?.editedMessage?.message?.reactionMessage) return protocol.editedMessage.message.reactionMessage;
     const nested = current.ephemeralMessage?.message ||
-      current.deviceSentMessage?.message || current.editedMessage?.message;
+      current.deviceSentMessage?.message || current.editedMessage?.message ||
+      protocol?.editedMessage?.message;
+    if (!nested) break;
+    current = nested;
+  }
+  return null;
+}
+
+function findReferencedMessageKey(message) {
+  const reaction = findReactionMessage(message);
+  if (reaction?.key?.id) return reaction.key;
+  let current = message?.message || message || null;
+  for (let i = 0; i < 8 && current; i++) {
+    if (current.protocolMessage?.key?.id) return current.protocolMessage.key;
+    const nested = current.ephemeralMessage?.message || current.deviceSentMessage?.message || current.editedMessage?.message;
     if (!nested) break;
     current = nested;
   }
@@ -92,11 +109,12 @@ function getEmojiReplyContext(message) {
   if (context?.quotedMessage) return context;
 
   const reaction = findReactionMessage(message);
-  const targetKey = reaction?.key;
-  if (!reaction?.text || !targetKey?.id) return null;
-  const remoteJid = targetKey.remoteJid || message?.key?.remoteJid || '';
-  const quotedMessage = msgCache.get(`${remoteJid}:${targetKey.id}`);
-  debug(`VIEW-ONCE reaction text=${JSON.stringify(reaction.text)} target=${remoteJid}:${targetKey.id} cached=${Boolean(quotedMessage)}`);
+  const targetKey = findReferencedMessageKey(message) || reaction?.key;
+  const emoji = reaction?.text || reaction?.emoji || '';
+  if (!emoji || !targetKey?.id) return null;
+  const remoteJid = targetKey.remoteJid || context?.remoteJid || message?.key?.remoteJid || '';
+  const quotedMessage = findStoredMessage(remoteJid, targetKey.id);
+  debug(`VIEW-ONCE reference text=${JSON.stringify(emoji)} target=${remoteJid}:${targetKey.id} cached=${Boolean(msgCache.get(`${remoteJid}:${targetKey.id}`))} stored=${Boolean(quotedMessage)}`);
   if (!quotedMessage) return null;
   return {
     quotedMessage,
@@ -106,7 +124,8 @@ function getEmojiReplyContext(message) {
     participant: targetKey.participant || '',
     remoteJid,
     quotedKey: targetKey,
-    mediaType: helpers.getMessageType ? helpers.getMessageType(quotedMessage) : null
+    mediaType: helpers.getMessageType ? helpers.getMessageType(quotedMessage) : null,
+    emoji
   };
 }
 
@@ -219,8 +238,47 @@ try { gamesModule = require('./commands/games'); } catch {}
 
 // ── Message cache for quoted-message lookups ───────────────────────────────
 const msgCache = new Map();
+const LOCAL_MESSAGE_STORE_PATH = path.join(__dirname, 'data', 'view_once_messages.json');
+let localMessageStore = new Map();
+let localStoreTimer = null;
+try {
+  const saved = JSON.parse(fs.readFileSync(LOCAL_MESSAGE_STORE_PATH, 'utf8'));
+  if (saved && typeof saved === 'object') localMessageStore = new Map(Object.entries(saved));
+} catch {}
+
+function hasViewOnceWrapper(content) {
+  let current = content;
+  for (let i = 0; i < 8 && current; i++) {
+    const keys = Object.keys(current);
+    if (keys.some(key => /viewOnceMessage/i.test(key))) return true;
+    current = current.ephemeralMessage?.message || current.deviceSentMessage?.message || current.editedMessage?.message || null;
+  }
+  return false;
+}
+
+function persistLocalMessage(key, content) {
+  if (!hasViewOnceWrapper(content)) return;
+  localMessageStore.set(key, content);
+  while (localMessageStore.size > 200) localMessageStore.delete(localMessageStore.keys().next().value);
+  if (localStoreTimer) clearTimeout(localStoreTimer);
+  localStoreTimer = setTimeout(() => {
+    try {
+      fs.mkdirSync(path.dirname(LOCAL_MESSAGE_STORE_PATH), { recursive: true });
+      fs.writeFileSync(LOCAL_MESSAGE_STORE_PATH, JSON.stringify(Object.fromEntries(localMessageStore)));
+    } catch {}
+  }, 250);
+}
+
+function findStoredMessage(jid, id) {
+  if (!jid || !id) return null;
+  const key = `${jid}:${id}`;
+  return msgCache.get(key) || localMessageStore.get(key) || null;
+}
+
 function cacheMsg(jid, id, content) {
-  msgCache.set(`${jid}:${id}`, content);
+  const key = `${jid}:${id}`;
+  msgCache.set(key, content);
+  persistLocalMessage(key, content);
   if (msgCache.size > 500) msgCache.delete(msgCache.keys().next().value);
 }
 
@@ -268,7 +326,7 @@ async function connectToWhatsApp() {
     generateHighQualityLinkPreview: false,
     // Return undefined when we don't have a cached message — safe for v7
     getMessage: async (key) => {
-      return msgCache.get(`${key.remoteJid}:${key.id}`) || undefined;
+      return findStoredMessage(key.remoteJid, key.id) || undefined;
     }
   });
 

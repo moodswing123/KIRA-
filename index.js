@@ -42,11 +42,37 @@ function isEmojiOnly(text) {
 }
 
 function getViewOncePayload(quoted) {
-  const wrapper = quoted?.viewOnceMessage?.message ||
-    quoted?.viewOnceMessageV2?.message ||
-    quoted?.viewOnceMessageV2Extension?.message;
-  const type = wrapper?.imageMessage ? 'image' : wrapper?.videoMessage ? 'video' : wrapper?.audioMessage ? 'audio' : null;
-  return type ? { message: wrapper, media: wrapper[`${type}Message`], type } : null;
+  let current = quoted || null;
+  let sawViewOnce = false;
+  for (let i = 0; i < 8 && current; i++) {
+    if (current.viewOnceMessage?.message) {
+      sawViewOnce = true;
+      current = current.viewOnceMessage.message;
+      continue;
+    }
+    if (current.viewOnceMessageV2?.message) {
+      sawViewOnce = true;
+      current = current.viewOnceMessageV2.message;
+      continue;
+    }
+    if (current.viewOnceMessageV2Extension?.message) {
+      sawViewOnce = true;
+      current = current.viewOnceMessageV2Extension.message;
+      continue;
+    }
+    const nested = current.ephemeralMessage?.message ||
+      current.documentWithCaptionMessage?.message ||
+      current.deviceSentMessage?.message ||
+      current.editedMessage?.message;
+    if (nested) {
+      current = nested;
+      continue;
+    }
+    break;
+  }
+  if (!sawViewOnce) return null;
+  const type = current?.imageMessage ? 'image' : current?.videoMessage ? 'video' : current?.audioMessage ? 'audio' : null;
+  return type ? { message: current, media: current[`${type}Message`], type } : null;
 }
 
 async function forwardViewOnceToOwner(sock, ownerJid, emoji, context, fallbackJid, downloadMedia = downloadMediaMessage) {

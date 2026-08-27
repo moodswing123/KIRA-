@@ -31,6 +31,18 @@ function ownerContact(botConfig) {
   return number ? `https://wa.me/${number}` : 'Owner number is not configured';
 }
 
+const MESSAGE_HANDLER_TIMEOUT_MS = 60000;
+const COMMAND_HANDLER_TIMEOUT_MS = 45000;
+
+function withTimeout(task, timeoutMs, label) {
+  let timer;
+  const operation = typeof task === 'function' ? Promise.resolve().then(task) : Promise.resolve(task);
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+  });
+  return Promise.race([operation, timeout]).finally(() => clearTimeout(timer));
+}
+
 function isEmojiOnly(text) {
   const value = String(text || '').trim();
   if (!value || value.length > 64) return false;
@@ -552,9 +564,13 @@ async function connectToWhatsApp() {
 
           for (const message of batch) {
         try {
-          await handleMessage(sock, message);
+          await withTimeout(
+            () => handleMessage(sock, message),
+            MESSAGE_HANDLER_TIMEOUT_MS,
+            'Message handler'
+          );
         } catch (e) {
-          err('Unhandled error in message handler', e);
+          err('Message handler recovered after failure/timeout', e);
         }
       }
     }).catch((e) => err('Unhandled messages.upsert queue error', e));
@@ -748,7 +764,11 @@ async function handleMessage(sock, message) {
   try {
     await helpers.withCommandContext(
       { command: `.${command}`, sender, jid },
-      () => handler.exec(args, sock, jid, isGroup, sender, message, botConfig, chatContext)
+      () => withTimeout(
+        () => handler.exec(args, sock, jid, isGroup, sender, message, botConfig, chatContext),
+        COMMAND_HANDLER_TIMEOUT_MS,
+        `.${command} command`
+      )
     );
     log(`.${command} executed for ${sender.split('@')[0]}`);
   } catch (e) {

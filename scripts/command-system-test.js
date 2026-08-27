@@ -98,6 +98,8 @@ async function main() {
 
   // Verify owner-controlled mode transitions and routing in DMs and groups.
   await dispatch(owner, '.private', { fromMe: true });
+  assert.strictEqual(db.getSetting('botMode'), 'private', 'private mode was not persisted');
+  assert.strictEqual(process.env.BOT_MODE, 'public', 'test must keep public env fallback to catch override bugs');
   const blockedDm = await dispatch(dm, '.ping');
   assert(blockedDm.some(item => /private mode/i.test(item.content.text || '')), 'private mode did not block another DM user');
   const blockedGroup = await dispatch(group, '.ping', { participant: dm });

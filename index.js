@@ -175,12 +175,10 @@ const botConfig = {
   name:        process.env.BOT_NAME    || 'KIRA-MD',
   version:     '1.0.0',
   prefix:      String(process.env.BOT_PREFIX || '.').trim() || '.',
-  // An explicit hosting-panel value is authoritative; persisted mode is used
-  // only when BOT_MODE is intentionally left unset.
+  // A mode changed with .private/.public is persisted and remains authoritative
+  // across restarts. BOT_MODE is only the first-run fallback.
   mode:        normalizeBotMode(
-    Object.prototype.hasOwnProperty.call(process.env, 'BOT_MODE') && String(process.env.BOT_MODE).trim()
-      ? process.env.BOT_MODE
-      : db.getSetting('botMode', 'public')
+    db.getSetting('botMode', null) || process.env.BOT_MODE || 'public'
   ),
   ownerNumber: normalizePhoneNumber(process.env.OWNER_NUMBER),
   ownerName:   process.env.OWNER_NAME  || 'Victory Tech',
@@ -314,6 +312,20 @@ function printBanner() {
 }
 
 // ── Main connection ────────────────────────────────────────────────────────
+let reconnectTimer = null;
+let activeSocket = null;
+
+function scheduleReconnect() {
+  if (reconnectTimer) return;
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connectToWhatsApp().catch((error) => {
+      err('Reconnect attempt failed', error);
+      scheduleReconnect();
+    });
+  }, 5000);
+}
+
 async function connectToWhatsApp() {
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
   const { version }          = await fetchLatestBaileysVersion();
@@ -334,6 +346,7 @@ async function connectToWhatsApp() {
       return findStoredMessage(key.remoteJid, key.id) || undefined;
     }
   });
+  activeSocket = sock;
 
   // Apply the selected style to bot-generated text and captions centrally.
   // Incoming user text and command arguments are never transformed.
@@ -422,13 +435,16 @@ async function connectToWhatsApp() {
 
     if (connection === 'close') {
       if (pairingTimer) clearTimeout(pairingTimer);
+      // Ignore close events from an obsolete socket after a reconnect.
+      if (activeSocket !== sock) return;
+      activeSocket = null;
       const code = lastDisconnect?.error?.output?.statusCode;
       err(`Connection closed (code ${code ?? 'unknown'})`);
       if (code === DisconnectReason.loggedOut) {
         warn('Logged out — delete auth_info_baileys/ folder and restart');
       } else {
         log('Reconnecting in 5 seconds...');
-        setTimeout(connectToWhatsApp, 5000);
+        scheduleReconnect();
       }
     }
   });
@@ -484,7 +500,11 @@ async function connectToWhatsApp() {
   });
 
   // ── Incoming messages ──────────────────────────────────────────────────
-  sock.ev.on('messages.upsert', async ({ messages, type }) => {
+  // Baileys may emit overlapping upsert batches. Process them serially so
+  // long-running commands and reconnect traffic cannot race command state.
+  let upsertQueue = Promise.resolve();
+  sock.ev.on('messages.upsert', ({ messages, type }) => {
+    upsertQueue = upsertQueue.then(async () => {
     const batch = Array.isArray(messages) ? messages : [];
     log(`UPSERT batch type=${type || 'unknown'} count=${batch.length}`);
 
@@ -530,16 +550,17 @@ async function connectToWhatsApp() {
     log(`UPSERT dispatch=${shouldDispatch ? 'yes' : 'cache-only'} type=${type || 'unknown'} relevantContext=${hasRelevantContext}`);
     if (!shouldDispatch) return;
 
-    for (const message of batch) {
-      try {
-        await handleMessage(sock, message);
-      } catch (e) {
-        err('Unhandled error in message handler', e);
+          for (const message of batch) {
+        try {
+          await handleMessage(sock, message);
+        } catch (e) {
+          err('Unhandled error in message handler', e);
+        }
       }
-    }
+    }).catch((e) => err('Unhandled messages.upsert queue error', e));
   });
-
   return sock;
+
 }
 
 // ── Message handler ────────────────────────────────────────────────────────
@@ -650,17 +671,20 @@ async function handleMessage(sock, message) {
   if (!text.startsWith(prefix)) return;
 
   // ── Private-mode guard ────────────────────────────────────────────────
-  // Private mode applies to all bot behavior, not only prefixed commands.
-  // Keep the response limited to command-like messages so normal chat is not
-  // interrupted, while making it clear to other users why their command did
-  // not run.
+  // Read the persisted setting for every command. This prevents a stale
+  // in-memory value or panel BOT_MODE default from reopening private mode
+  // after a reconnect/restart.
+  const activeMode = normalizeBotMode(
+    db.getSetting('botMode', null) || botConfig.mode || process.env.BOT_MODE || 'public'
+  );
+  botConfig.mode = activeMode;
   const isOwner = helpers.resolveIsOwner(message, sender, botConfig);
   const ownerSettingsJid = botConfig.ownerJid || (botConfig.ownerNumber ? `${botConfig.ownerNumber}@s.whatsapp.net` : sender);
   const sudoUsers = db.getOwnerSetting(ownerSettingsJid, 'sudoUsers', []);
   const isSudo = Array.isArray(sudoUsers) && sudoUsers.some(user => helpers.sameJid(user, sender));
-  if (botConfig.mode === 'private' && !isOwner && !isSudo) {
+  if (activeMode === 'private' && !isOwner && !isSudo) {
     await sock.sendMessage(jid, {
-      text: '🔒 Kira MD is currently in *private mode* and can only be used by the owner.'
+      text: '🔒 Kira MD is currently in *private mode* and can only be used by the owner or approved sudo users.'
     });
     return;
   }

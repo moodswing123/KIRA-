@@ -187,20 +187,54 @@ const generalCommands = {
   },
 
   device: {
-    category: 'utility', desc: 'Show the visible WhatsApp device identifier for a user',
-    usage: '.device [mention or reply]', aliases: ['checkdevice'], permissions: 'all',
-    examples: ['.device', '.device @2348012345678'],
-    exec: async (args, sock, jid, isGroup, sender, message) => {
-      const ctx = getCtx(message);
-      const target = getMentionedJid(message) || ctx?.quotedSender || sender;
-      const raw = String(target || '');
-      const match = raw.match(/:(\d+)@/);
-      const deviceId = match ? match[1] : '0';
-      const deviceType = match ? 'Companion/linked device' : 'Primary device or device ID unavailable';
-      await sock.sendMessage(jid, {
-        text: `📱 *Device Information*\n\n👤 User: @${raw.split('@')[0].split(':')[0]}\n🔢 Device ID: ${deviceId}\n💻 Type: ${deviceType}\n\n_Note: WhatsApp exposes only the device metadata available in the message JID._`,
-        mentions: target ? [target] : []
-      });
+    category: 'utility', desc: 'Reveal the device and account type from a replied message',
+    usage: '.device (reply to a user message)', aliases: ['checkdevice'], permissions: 'owner',
+    examples: ['.device (reply to a user message)'],
+    exec: async (args, sock, jid, isGroup, sender, message, botConfig, chatContext) => {
+      const quoted = message?.message?.extendedTextMessage?.contextInfo;
+      if (!chatContext?.isOwner) {
+        return sock.sendMessage(jid, {
+          text: '𐀪𐀪 *KIRA-MD:* Owner only.'
+        }, { quoted: message });
+      }
+      if (!quoted || !quoted.stanzaId || !quoted.participant) {
+        return sock.sendMessage(jid, {
+          text: '𐀪𐀪 *KIRA-MD:* Reply to a user’s recent message to reveal their device.'
+        }, { quoted: message });
+      }
+
+      const quotedId = String(quoted.stanzaId);
+      const userJid = quoted.participant;
+      let device = 'I O S';
+      if (quotedId.startsWith('3EB0')) device = 'W A - W E B';
+      else if (quotedId.startsWith('BAE5')) device = 'A N D R O I D';
+      else if (quotedId.startsWith('BAE9')) device = 'I O S';
+      else if (quotedId.length > 21) device = 'A N D R O I D';
+
+      let accountType = 'P E R S O N A L';
+      try {
+        if (typeof sock.getBusinessProfile === 'function') {
+          const bizProfile = await sock.getBusinessProfile(userJid);
+          if (bizProfile && (bizProfile.description || bizProfile.category || bizProfile.address || bizProfile.website)) {
+            accountType = 'B U S I N E S S';
+          }
+        }
+      } catch (_) {
+        // Non-business accounts commonly reject this lookup; keep PERSONAL.
+      }
+
+      const text =
+        `╭─❖ *KIRA-MD DEVICE REPORT* ❖─╮\n` +
+        `│\n` +
+        `│ 📱 Device  : *${device}*\n` +
+        `│ 💼 Account : *${accountType}*\n` +
+        `│ 👤 User    : @${userJid.split('@')[0].split(':')[0]}\n` +
+        `│\n` +
+        `╰─ Powered by *Victory Tech™* ─╯`;
+      return sock.sendMessage(jid, {
+        text,
+        mentions: [userJid]
+      }, { quoted: message });
     }
   },
 

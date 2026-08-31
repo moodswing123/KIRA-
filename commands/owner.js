@@ -60,12 +60,22 @@ function getSudoUsers(botConfig, sender) {
 }
 
 async function applyBotMode(mode, sock, jid, botConfig) {
-  if (botConfig) botConfig.mode = mode;
-  if (global.botConfig) global.botConfig.mode = mode;
-  db.setSetting('botMode', mode);
-  await sock.sendMessage(jid, {
-    text: `🔒 Bot mode set to *${mode.toUpperCase()}*\n\n${mode === 'private' ? '🔒 Only owner can use commands.' : '🌐 Everyone can use commands.'}`
-  });
+  // Validate and normalize mode
+  const normalizedMode = String(mode || '').toLowerCase() === 'private' ? 'private' : 'public';
+  
+  // Update in-memory config
+  if (botConfig) botConfig.mode = normalizedMode;
+  if (global.botConfig) global.botConfig.mode = normalizedMode;
+  
+  // Persist to database
+  db.setSetting('botMode', normalizedMode);
+  
+  // Send confirmation with appropriate messaging
+  const message = normalizedMode === 'private'
+    ? '🔒 Bot mode changed to PRIVATE.\nOnly authorized users can use bot commands.'
+    : '🌐 Bot mode changed to PUBLIC.\nAll users can use available bot commands.';
+  
+  await sock.sendMessage(jid, { text: message });
 }
 
 const ownerCommands = {

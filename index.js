@@ -182,7 +182,7 @@ const db         = require('./lib/database');
 const helpers    = require('./lib/helpers');
 const fontStyles = require('./lib/font');
 
-// ── Config ─────────────────────────────────────────────────────────────────
+// ── Config ───────────────────────────────────────────────────────────────────
 const botConfig = {
   name:        process.env.BOT_NAME    || 'KIRA-MD',
   version:     '1.0.0',
@@ -236,7 +236,7 @@ try {
         broken: 0,
         failedModules: []
       };
-  log(`🤖 KIRA-MD COMMAND SYSTEM | Prefix: ${botConfig.prefix} | Mode: ${botConfig.mode}`);
+  log(`🤖 KIRA-MD COMMAND SYSTEM | Prefix: ${botConfig.prefix} | Mode: ${botConfig.mode.toUpperCase()}`);
   log(`Commands loaded: ${health.loaded} | Aliases loaded: ${health.aliases}`);
   log(`Broken commands: ${health.broken} | Command loader: ${health.broken ? 'CHECK REQUIRED' : 'READY'}`);
   for (const failed of health.failedModules || []) {
@@ -297,7 +297,7 @@ function cacheMsg(jid, id, content) {
   if (msgCache.size > 500) msgCache.delete(msgCache.keys().next().value);
 }
 
-// ── Banner ─────────────────────────────────────────────────────────────────
+// ── Banner ───────────────────────────────────────────────────────────────────
 function printBanner() {
   const health = typeof allCommands.healthReport === 'function'
     ? allCommands.healthReport()
@@ -313,7 +313,7 @@ function printBanner() {
   console.log('╚══════════════════════════════════════════╝');
   console.log(`\n  Prefix  : ${botConfig.prefix}`);
   console.log(`  Owner   : ${botConfig.ownerName} (${botConfig.ownerNumber || '⚠ NOT SET — edit .env'})`);
-  console.log(`  Mode    : ${botConfig.mode}`);
+  console.log(`  Mode    : ${botConfig.mode.toUpperCase()} 🔒`);
   console.log(`  Commands loaded: ${health.loaded}`);
   console.log(`  Aliases loaded : ${health.aliases}`);
   console.log(`  Broken commands: ${health.broken}`);
@@ -398,7 +398,7 @@ async function connectToWhatsApp() {
       console.log('╚══════════════════════════════════════════╝');
       console.log('  1. Open WhatsApp on your phone');
       console.log('  2. Settings → Linked Devices → Link a Device');
-      console.log('  3. Choose “Link with phone number instead”');
+      console.log('  3. Choose "Link with phone number instead"');
       console.log('  4. Enter THIS latest code within 60 seconds');
       console.log('  ⚠️ Use only this newest code; do not request another one\n');
     } catch (e) {
@@ -439,9 +439,16 @@ async function connectToWhatsApp() {
       botConfig.ownerJid = botConfig.ownerNumber
         ? `${botConfig.ownerNumber}@s.whatsapp.net`
         : jid;
+      
+      // Reload mode from database on connection to ensure it's current
+      botConfig.mode = normalizeBotMode(
+        db.getSetting('botMode', null) || process.env.BOT_MODE || 'public'
+      );
+      
       if (pairingTimer) clearTimeout(pairingTimer);
       pairingCodeDisplayed = true;
       log(`✅ Connected as ${jid}`);
+      log(`Bot mode: ${botConfig.mode.toUpperCase()} 🔒`);
       log('Bot is online and ready to receive messages!');
     }
 
@@ -537,7 +544,7 @@ async function connectToWhatsApp() {
       const hasReaction = Boolean(reaction);
       const jid = message?.key?.remoteJid || 'unknown';
       const participant = message?.key?.participant || message?.participant || '';
-      log(`UPSERT item=${index} type=${type || 'unknown'} id=${message?.key?.id || 'unknown'} fromMe=${Boolean(message?.key?.fromMe)} chat=${jid} participant=${participant || 'none'} keys=${keyText} quoted=${hasQuoted} reaction=${hasReaction} reactionText=${hasReaction ? Boolean(reaction.text) : false} viewOnce=${hasViewOnce}`);
+      log(`UPSERT item=${index} type=${type || 'unknown'} id=${message?.key?.id || 'unknown'} fromMe=${Boolean(message?.key?.fromMe)} chat=${jid} participant=${participant || 'none'} keys=${keyText}`);
 
       if (message.key?.remoteJid && message.key?.id && message.message) {
         cacheMsg(message.key.remoteJid, message.key.id, message.message);
@@ -694,11 +701,17 @@ async function handleMessage(sock, message) {
     db.getSetting('botMode', null) || botConfig.mode || process.env.BOT_MODE || 'public'
   );
   botConfig.mode = activeMode;
+  
   const isOwner = helpers.resolveIsOwner(message, sender, botConfig);
   const ownerSettingsJid = botConfig.ownerJid || (botConfig.ownerNumber ? `${botConfig.ownerNumber}@s.whatsapp.net` : sender);
   const sudoUsers = db.getOwnerSetting(ownerSettingsJid, 'sudoUsers', []);
   const isSudo = Array.isArray(sudoUsers) && sudoUsers.some(user => helpers.sameJid(user, sender));
+  
+  // DEBUG: Log mode decision
+  debug(`MODE CHECK | activeMode=${activeMode} | sender=${sender} | isOwner=${isOwner} | isSudo=${isSudo}`);
+  
   if (activeMode === 'private' && !isOwner && !isSudo) {
+    debug(`BLOCKED COMMAND | sender=${sender} not authorized in private mode`);
     await sock.sendMessage(jid, {
       text: '🔒 Kira MD is currently in *private mode* and can only be used by the owner or approved sudo users.'
     });
@@ -810,7 +823,7 @@ function hasPermission(permission, context) {
 process.on('uncaughtException',  (e) => err('Uncaught exception', e));
 process.on('unhandledRejection', (e) => err('Unhandled rejection', e));
 
-// ── Start ─────────────────────────────────────────────────────────────────
+// ── Start ───────────────────────────────────────────────────────────────────
 // The generic Pterodactyl Node template may invoke .js files through
 // `ts-node --esm`. In that mode require.main !== module, so the old guard
 // silently skipped startup and the panel saw a clean exit (code 0).

@@ -114,7 +114,7 @@ Copy `.env.example` to `.env`, then fill in the values you need. Keep the `.env`
 |----------|-------------|------------------|
 | `BOT_NAME` | Bot display name | `KIRA-MD` |
 | `BOT_PREFIX` | Command prefix | `.` |
-| `BOT_MODE` | `public` or `private` | `public` |
+| `BOT_MODE` | `public` or `private` | `public`; `private` always enforces private mode |
 | `OWNER_NUMBER` | WhatsApp owner number with country code and digits only | Required for owner commands |
 | `OWNER_NAME` | Owner display name | `Victory Tech` |
 
@@ -186,6 +186,7 @@ pkg install ffmpeg
 
 - **Auth folder**: `auth_info_baileys/` — do NOT delete while bot is running
 - **Data**: stored in `data/db.json` — auto-saved
+- **Private mode**: set `BOT_MODE=private` to enforce private mode even if an older `data/db.json` contains `botMode: "public"`. Remove or change that environment setting before using `.public`.
 - **Rate limiting**: WhatsApp may temporarily block the number if too many messages are sent too fast
 - **Terms**: Use responsibly. Comply with WhatsApp's Terms of Service.
 

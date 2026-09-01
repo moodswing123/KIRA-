@@ -100,6 +100,17 @@ async function main() {
   await dispatch(owner, '.private', { fromMe: true });
   assert.strictEqual(db.getSetting('botMode'), 'private', 'private mode was not persisted');
   assert.strictEqual(process.env.BOT_MODE, 'public', 'test must keep public env fallback to catch override bugs');
+  // An explicit private environment setting must not be weakened by a stale
+  // persisted public setting.
+  process.env.BOT_MODE = 'private';
+  db.setSetting('botMode', 'public');
+  assert.strictEqual(
+    (await dispatch(dm, '.ping')).length,
+    0,
+    'BOT_MODE=private must override a stale persisted public setting'
+  );
+  db.setSetting('botMode', 'private');
+  process.env.BOT_MODE = 'public';
   // A connected bot JID is a comparison target, not an incoming sender.
   // Regression coverage: it must not make every user look like the owner.
   botConfig.botJid = sock.user.id;
@@ -122,6 +133,12 @@ async function main() {
   db.updateGroup(group, { antiLink: false });
   const ownerPrivate = await dispatch(owner, '.ping', { fromMe: true });
   assert(ownerPrivate.some(item => /Pong/.test(item.content.text || '')), 'owner command failed in private mode');
+  // Linked-device owner commands can target another chat while fromMe points
+  // to the account owner rather than the chat recipient.
+  assert(
+    (await dispatch(dm, '.ping', { fromMe: true })).some(item => /Pong/.test(item.content.text || '')),
+    'fromMe owner command failed in private mode'
+  );
   await dispatch(owner, '.public', { fromMe: true });
   assert((await dispatch(dm, '.ping')).some(item => /Pong/.test(item.content.text || '')), 'public mode did not allow another DM user');
   assert((await dispatch(group, '.ping', { participant: dm })).some(item => /Pong/.test(item.content.text || '')), 'public mode did not allow another group user');

@@ -26,6 +26,18 @@ function normalizeBotMode(value) {
   return String(value || '').toLowerCase() === 'private' ? 'private' : 'public';
 }
 
+function configuredBotMode() {
+  // PRIVATE is a safety setting: an explicit environment value must not be
+  // weakened by an old persisted PUBLIC setting. Persisted mode still lets
+  // the owner switch between modes when the environment is not forcing
+  // private mode.
+  const envMode = String(process.env.BOT_MODE || '').trim().toLowerCase();
+  if (envMode === 'private') return 'private';
+  return normalizeBotMode(
+    db.getSetting('botMode', null) || envMode || botConfig?.mode || 'public'
+  );
+}
+
 function ownerContact(botConfig) {
   const number = botConfig?.ownerNumber;
   return number ? `https://wa.me/${number}` : 'Owner number is not configured';
@@ -190,7 +202,9 @@ const botConfig = {
   // A mode changed with .private/.public is persisted and remains authoritative
   // across restarts. BOT_MODE is only the first-run fallback.
   mode:        normalizeBotMode(
-    db.getSetting('botMode', null) || process.env.BOT_MODE || 'public'
+    String(process.env.BOT_MODE || '').trim().toLowerCase() === 'private'
+      ? 'private'
+      : db.getSetting('botMode', null) || process.env.BOT_MODE || 'public'
   ),
   ownerNumber: normalizePhoneNumber(process.env.OWNER_NUMBER),
   ownerName:   process.env.OWNER_NAME  || 'Victory Tech',
@@ -441,9 +455,7 @@ async function connectToWhatsApp() {
         : jid;
       
       // Reload mode from database on connection to ensure it's current
-      botConfig.mode = normalizeBotMode(
-        db.getSetting('botMode', null) || process.env.BOT_MODE || 'public'
-      );
+      botConfig.mode = configuredBotMode();
       
       if (pairingTimer) clearTimeout(pairingTimer);
       pairingCodeDisplayed = true;
@@ -594,7 +606,14 @@ async function handleMessage(sock, message) {
 
   const jid      = message.key.remoteJid;
   const isGroup  = helpers.isGroupJid(jid);
-  const sender   = helpers.getSenderJid(message, isGroup);
+  const messageSender = helpers.getSenderJid(message, isGroup);
+  // Messages sent from the linked owner account are marked `fromMe`. In a
+  // direct chat their remoteJid is the recipient, not the owner, so use the
+  // configured owner identity for permission checks.
+  const sender = message.key.fromMe
+    ? (botConfig.ownerJid ||
+      (botConfig.ownerNumber ? `${botConfig.ownerNumber}@s.whatsapp.net` : messageSender))
+    : messageSender;
   if (!sender) return;
 
   // Log only reaction/view-once-shaped events before text extraction. This is
@@ -616,9 +635,7 @@ async function handleMessage(sock, message) {
   // Private mode must be enforced before any automatic responders (trivia,
   // anti-link, view-once handling, etc.). Unauthorized chats should be silent:
   // sending a denial message still exposes that the bot is listening.
-  const activeMode = normalizeBotMode(
-    db.getSetting('botMode', null) || botConfig.mode || process.env.BOT_MODE || 'public'
-  );
+  const activeMode = configuredBotMode();
   botConfig.mode = activeMode;
 
   const isOwner = helpers.resolveIsOwner(message, sender, botConfig);

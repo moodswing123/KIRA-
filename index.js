@@ -613,6 +613,28 @@ async function handleMessage(sock, message) {
 
   if (!text) return; // no usable text
 
+  // Private mode must be enforced before any automatic responders (trivia,
+  // anti-link, view-once handling, etc.). Unauthorized chats should be silent:
+  // sending a denial message still exposes that the bot is listening.
+  const activeMode = normalizeBotMode(
+    db.getSetting('botMode', null) || botConfig.mode || process.env.BOT_MODE || 'public'
+  );
+  botConfig.mode = activeMode;
+
+  const isOwner = helpers.resolveIsOwner(message, sender, botConfig);
+  const ownerSettingsJid = botConfig.ownerJid ||
+    (botConfig.ownerNumber ? `${botConfig.ownerNumber}@s.whatsapp.net` : sender);
+  const sudoUsers = db.getOwnerSetting(ownerSettingsJid, 'sudoUsers', []);
+  const isSudo = Array.isArray(sudoUsers) &&
+    sudoUsers.some(user => helpers.sameJid(user, sender));
+
+  debug(`MODE CHECK | activeMode=${activeMode} | sender=${sender} | isOwner=${isOwner} | isSudo=${isSudo}`);
+
+  if (activeMode === 'private' && !isOwner && !isSudo) {
+    debug(`BLOCKED MESSAGE | sender=${sender} not authorized in private mode`);
+    return;
+  }
+
   // An owner emoji reply to view-once media saves that media directly to the owner DM.
   const emojiContext = getEmojiReplyContext(message);
   const ownerForViewOnce = botConfig.ownerJid || (botConfig.ownerNumber ? `${botConfig.ownerNumber}@s.whatsapp.net` : '');
@@ -694,29 +716,8 @@ async function handleMessage(sock, message) {
   if (!text.startsWith(prefix)) return;
 
   // ── Private-mode guard ────────────────────────────────────────────────
-  // Read the persisted setting for every command. This prevents a stale
-  // in-memory value or panel BOT_MODE default from reopening private mode
-  // after a reconnect/restart.
-  const activeMode = normalizeBotMode(
-    db.getSetting('botMode', null) || botConfig.mode || process.env.BOT_MODE || 'public'
-  );
-  botConfig.mode = activeMode;
-  
-  const isOwner = helpers.resolveIsOwner(message, sender, botConfig);
-  const ownerSettingsJid = botConfig.ownerJid || (botConfig.ownerNumber ? `${botConfig.ownerNumber}@s.whatsapp.net` : sender);
-  const sudoUsers = db.getOwnerSetting(ownerSettingsJid, 'sudoUsers', []);
-  const isSudo = Array.isArray(sudoUsers) && sudoUsers.some(user => helpers.sameJid(user, sender));
-  
-  // DEBUG: Log mode decision
-  debug(`MODE CHECK | activeMode=${activeMode} | sender=${sender} | isOwner=${isOwner} | isSudo=${isSudo}`);
-  
-  if (activeMode === 'private' && !isOwner && !isSudo) {
-    debug(`BLOCKED COMMAND | sender=${sender} not authorized in private mode`);
-    await sock.sendMessage(jid, {
-      text: '🔒 Kira MD is currently in *private mode* and can only be used by the owner or approved sudo users.'
-    });
-    return;
-  }
+  // Access was checked before all message responders above. Authorized
+  // owners/sudo users continue through to command parsing normally.
 
   // ── Global ban check ──────────────────────────────────────────────────
   if (db.isUserBanned(sender)) return;

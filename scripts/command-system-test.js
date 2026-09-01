@@ -101,9 +101,21 @@ async function main() {
   assert.strictEqual(db.getSetting('botMode'), 'private', 'private mode was not persisted');
   assert.strictEqual(process.env.BOT_MODE, 'public', 'test must keep public env fallback to catch override bugs');
   const blockedDm = await dispatch(dm, '.ping');
-  assert(blockedDm.some(item => /private mode/i.test(item.content.text || '')), 'private mode did not block another DM user');
+  assert.strictEqual(blockedDm.length, 0, 'private mode must silently ignore another DM user');
   const blockedGroup = await dispatch(group, '.ping', { participant: dm });
-  assert(blockedGroup.some(item => /private mode/i.test(item.content.text || '')), 'private mode did not block another group user');
+  assert.strictEqual(blockedGroup.length, 0, 'private mode must silently ignore another group user');
+  db.updateGroup(group, { antiLink: true, antiLinkAction: 'warn' });
+  const blockedAutomaticResponse = await dispatch(
+    group,
+    'please review https://example.com',
+    { participant: dm }
+  );
+  assert.strictEqual(
+    blockedAutomaticResponse.length,
+    0,
+    'private mode must silence automatic group responses too'
+  );
+  db.updateGroup(group, { antiLink: false });
   const ownerPrivate = await dispatch(owner, '.ping', { fromMe: true });
   assert(ownerPrivate.some(item => /Pong/.test(item.content.text || '')), 'owner command failed in private mode');
   await dispatch(owner, '.public', { fromMe: true });

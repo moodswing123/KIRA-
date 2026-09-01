@@ -18,6 +18,44 @@ function getMenuVideoUrl() {
   return /^https?:\/\/[^\s]+$/i.test(String(value || '').trim()) ? String(value).trim() : '';
 }
 
+async function sendMenu(sock, jid, text) {
+  const remoteVideo = getMenuVideoUrl();
+  const remoteImage = getMenuImageUrl();
+  const mediaAttempts = [];
+
+  if (remoteVideo) {
+    mediaAttempts.push(['remote video', {
+      video: { url: remoteVideo },
+      caption: text,
+      mimetype: 'video/mp4'
+    }]);
+  }
+  if (remoteImage) {
+    mediaAttempts.push(['remote image', {
+      image: { url: remoteImage },
+      caption: text
+    }]);
+  }
+  if (LOCAL_MENU_IMAGE_PATH && fs.existsSync(LOCAL_MENU_IMAGE_PATH)) {
+    mediaAttempts.push(['local image', {
+      image: fs.readFileSync(LOCAL_MENU_IMAGE_PATH),
+      caption: text
+    }]);
+  }
+
+  for (const [label, content] of mediaAttempts) {
+    try {
+      await sock.sendMessage(jid, content);
+      return;
+    } catch (error) {
+      // A stale media URL must not make the otherwise valid text menu fail.
+      console.error(`[Kira MD] Menu ${label} failed; falling back`, error?.message || error);
+    }
+  }
+
+  await sock.sendMessage(jid, { text });
+}
+
 let PKG_VERSION = '1.0.0';
 try { PKG_VERSION = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')).version || PKG_VERSION; } catch (_) {}
 
@@ -128,28 +166,7 @@ const mainCommands = {
       const catReg  = allCmds.categoryRegistry || {};
       const catOrder = allCmds.CATEGORY_ORDER || [];
       const text    = buildMainMenu(cfg, allCmds, catReg, catOrder);
-
-      const remoteVideo = getMenuVideoUrl();
-      const remoteImage = getMenuImageUrl();
-      if (remoteVideo) {
-        await sock.sendMessage(jid, {
-          video:   { url: remoteVideo },
-          caption: text,
-          mimetype: 'video/mp4'
-        });
-      } else if (remoteImage) {
-        await sock.sendMessage(jid, {
-          image:   { url: remoteImage },
-          caption: text
-        });
-      } else if (LOCAL_MENU_IMAGE_PATH && fs.existsSync(LOCAL_MENU_IMAGE_PATH)) {
-        await sock.sendMessage(jid, {
-          image:   fs.readFileSync(LOCAL_MENU_IMAGE_PATH),
-          caption: text
-        });
-      } else {
-        await sock.sendMessage(jid, { text });
-      }
+      await sendMenu(sock, jid, text);
     }
   },
 

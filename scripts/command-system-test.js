@@ -56,6 +56,9 @@ const sock = {
     };
   },
   async sendMessage(jid, content) {
+    if (this.failMenuMedia && (content?.video || content?.image)) {
+      throw new Error('simulated expired menu media URL');
+    }
     sent.push({ jid, content });
     return { key: { id: 'test-sent' } };
   },
@@ -142,6 +145,20 @@ async function main() {
   await dispatch(owner, '.public', { fromMe: true });
   assert((await dispatch(dm, '.ping')).some(item => /Pong/.test(item.content.text || '')), 'public mode did not allow another DM user');
   assert((await dispatch(group, '.ping', { participant: dm })).some(item => /Pong/.test(item.content.text || '')), 'public mode did not allow another group user');
+
+  // A previously configured menu media URL can expire after the bot starts.
+  // Menu delivery must fall back to text instead of entering the generic
+  // command-failure path.
+  db.setSetting('menuVideoUrl', 'https://example.com/menu.mp4');
+  sock.failMenuMedia = true;
+  try {
+    const menuFallback = await dispatch(dm, '.menu');
+    assert(menuFallback.some(item => /COMMAND CENTER/.test(item.content.text || '')), 'menu did not fall back to text after media failure');
+  } finally {
+    sock.failMenuMedia = false;
+    db.setSetting('menuVideoUrl', '');
+    db.setSetting('menuImageUrl', '');
+  }
 
   const help = await dispatch(dm, '.help ping');
   assert(help.some(item => /Help/.test(item.content.text || '') && /\.ping/.test(item.content.text || '')), 'arguments failed');

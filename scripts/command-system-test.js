@@ -39,7 +39,7 @@ process.env.BOT_MODE = 'public';
 process.env.OWNER_NUMBER = '2348000000000';
 
 const db = require('../lib/database');
-const { handleMessage, hasPermission, getCommandHealth } = require('../index');
+const { botConfig, handleMessage, hasPermission, getCommandHealth } = require('../index');
 const registry = require('../commands');
 const { commandErrorMessage } = require('../lib/helpers');
 const sent = [];
@@ -100,6 +100,10 @@ async function main() {
   await dispatch(owner, '.private', { fromMe: true });
   assert.strictEqual(db.getSetting('botMode'), 'private', 'private mode was not persisted');
   assert.strictEqual(process.env.BOT_MODE, 'public', 'test must keep public env fallback to catch override bugs');
+  // A connected bot JID is a comparison target, not an incoming sender.
+  // Regression coverage: it must not make every user look like the owner.
+  botConfig.botJid = sock.user.id;
+  botConfig.connectedJid = sock.user.id;
   const blockedDm = await dispatch(dm, '.ping');
   assert.strictEqual(blockedDm.length, 0, 'private mode must silently ignore another DM user');
   const blockedGroup = await dispatch(group, '.ping', { participant: dm });

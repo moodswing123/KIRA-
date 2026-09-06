@@ -146,6 +146,29 @@ async function main() {
   assert((await dispatch(dm, '.ping')).some(item => /Pong/.test(item.content.text || '')), 'public mode did not allow another DM user');
   assert((await dispatch(group, '.ping', { participant: dm })).some(item => /Pong/.test(item.content.text || '')), 'public mode did not allow another group user');
 
+  // Sudo users inherit normal and group-admin command access, but not owner
+  // controls that can change bot settings or expose owner-sensitive details.
+  botConfig.ownerJid = owner;
+  db.setOwnerSetting(owner, 'sudoUsers', [dm]);
+  try {
+    assert(
+      (await dispatch(group, '.tagall delegated access', { participant: dm }))
+        .some(item => /delegated access/.test(item.content.text || '')),
+      'sudo user could not use an admin command'
+    );
+    assert(
+      (await dispatch(dm, '.dashboard')).some(item => /owner-only/.test(item.content.text || '')),
+      'sudo user reached owner dashboard'
+    );
+    assert(
+      (await dispatch(dm, '.owner')).some(item => /owner-only/.test(item.content.text || '')),
+      'sudo user reached owner information command'
+    );
+  } finally {
+    db.setOwnerSetting(owner, 'sudoUsers', []);
+    botConfig.ownerJid = '';
+  }
+
   // A previously configured menu media URL can expire after the bot starts.
   // Menu delivery must fall back to text instead of entering the generic
   // command-failure path.
@@ -195,6 +218,10 @@ async function main() {
   assert.strictEqual(hasPermission('owner', { isOwner: true, isGroup: false }), true);
   assert.strictEqual(hasPermission('admin', { isOwner: false, isGroup: false, isSenderAdmin: true }), false);
   assert.strictEqual(hasPermission('admin', { isOwner: false, isGroup: true, isSenderAdmin: true }), true);
+  assert.strictEqual(hasPermission('all', { isOwner: false, isSudo: true }), true, 'sudo should access normal commands');
+  assert.strictEqual(hasPermission('admin', { isOwner: false, isSudo: true }), true, 'sudo should access admin commands');
+  assert.strictEqual(hasPermission('admin_or_owner', { isOwner: false, isSudo: true }), true, 'sudo should access delegated admin commands');
+  assert.strictEqual(hasPermission('owner', { isOwner: false, isSudo: true }), false, 'sudo should not access owner controls');
 
   const originalPing = registry.ping.exec;
   registry.ping.exec = async () => {

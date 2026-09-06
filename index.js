@@ -825,6 +825,14 @@ function isChatTypeAllowed(handler, context) {
 }
 
 function hasPermission(permission, context) {
+  // Sudo users are delegated operators: they can use normal and group-admin
+  // commands, but never owner-only controls. This keeps settings, lifecycle
+  // controls, sudo management, and owner-sensitive commands owner-only.
+  if (context?.isOwner) return true;
+  if (context?.isSudo && String(permission || 'all').toLowerCase() !== 'owner') {
+    return true;
+  }
+
   switch (String(permission || 'all').toLowerCase()) {
     case 'owner':
       return context.isOwner;

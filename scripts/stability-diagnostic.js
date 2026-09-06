@@ -9,7 +9,11 @@ assert(source.includes('if (reconnectTimer) return'), 'duplicate reconnect prote
 assert(source.includes("let upsertQueue = Promise.resolve()"), 'upsert serialization missing');
 assert(source.includes('MESSAGE_HANDLER_TIMEOUT_MS = 60000'), 'message timeout missing');
 assert(source.includes('COMMAND_HANDLER_TIMEOUT_MS = 45000'), 'command timeout missing');
-assert(source.includes("activeMode = normalizeBotMode"), 'authoritative mode read missing');
+assert(
+  source.includes('activeMode = configuredBotMode()') ||
+  source.includes('activeMode = normalizeBotMode'),
+  'authoritative mode read missing'
+);
 
 const originalLoad = Module._load;
 const stubs = new Map([

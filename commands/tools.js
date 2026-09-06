@@ -8,6 +8,7 @@ const { downloadMediaMessage } = require('@whiskeysockets/baileys');
 const { spawn } = require('child_process');
 const { getMessageContext, commandErrorMessage, getMessageType, unwrapMessage } = require('../lib/helpers');
 const db = require('../lib/database');
+const MultipartForm = require('form-data');
 
 const WATERMARK = '\n\n_Powered by Victory Tech™_';
 
@@ -44,49 +45,81 @@ function ffmpegRun(inputPath, outputPath, extraArgs = []) {
 }
 
 async function uploadToCatbox(buffer, filename, mimetype) {
-  const fd = new FormData();
+  const fd = new MultipartForm();
   fd.append('reqtype', 'fileupload');
   const userhash = String(process.env.CATBOX_USERHASH || '').trim();
   if (userhash) fd.append('userhash', userhash);
-  fd.append('fileToUpload', new Blob([buffer], { type: mimetype }), filename);
-  const res = await fetch('https://catbox.moe/user/api.php', {
-    method: 'POST', body: fd, signal: AbortSignal.timeout(60000)
+  fd.append('fileToUpload', buffer, { filename, contentType: mimetype });
+  const res = await axios.post('https://catbox.moe/user/api.php', fd, {
+    headers: { ...fd.getHeaders(), 'User-Agent': 'Kira-MD/1.0' },
+    timeout: 60000,
+    maxContentLength: Infinity,
+    maxBodyLength: Infinity,
+    validateStatus: () => true
   });
-  const text = (await res.text()).trim();
-  if (!res.ok || !/^https?:\/\//i.test(text)) throw new Error(`Catbox upload failed: ${text.slice(0, 160)}`);
+  const text = String(res.data || '').trim();
+  if (res.status < 200 || res.status >= 300 || !/^https?:\/\//i.test(text)) {
+    throw new Error(`Catbox upload failed: ${text.slice(0, 160) || `HTTP ${res.status}`}`);
+  }
   return text;
 }
 
 async function resolveTmpfilesDirectUrl(url) {
-  const res = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(15000) });
-  const contentType = String(res.headers.get('content-type') || '').toLowerCase();
-  if (res.ok && contentType.startsWith('image/')) return url;
-  const html = await res.text();
+  const res = await axios.get(url, {
+    responseType: 'text',
+    timeout: 15000,
+    validateStatus: () => true
+  });
+  const contentType = String(res.headers['content-type'] || '').toLowerCase();
+  // Direct tmpfiles links can point to video, audio, and documents too.
+  if (res.status >= 200 && res.status < 300 && contentType && !contentType.includes('text/html')) {
+    return url;
+  }
+  const html = String(res.data || '');
   const match = html.match(/https?:\/\/tmpfiles\.org\/dl\/[^"'<>\s]+/i);
   if (!match) throw new Error('tmpfiles returned a landing page without a direct download URL');
-  return match[0];
+  const direct = match[0];
+  const directResponse = await axios.get(direct, {
+    responseType: 'stream',
+    timeout: 15000,
+    validateStatus: () => true
+  });
+  const directType = String(directResponse.headers['content-type'] || '').toLowerCase();
+  if (directResponse.status < 200 || directResponse.status >= 300 || !directType || directType.includes('text/html')) {
+    throw new Error(`Resolved tmpfiles URL returned ${directResponse.status}`);
+  }
+  directResponse.data?.destroy?.();
+  return direct;
 }
 
 async function uploadToPublicUrl(buffer, filename, mimetype) {
   try {
-    const fd = new FormData();
-    fd.append('file', new Blob([buffer], { type: mimetype }), filename);
-    const res = await fetch('https://0x0.st', {
-      method: 'POST', body: fd, signal: AbortSignal.timeout(60000)
+    const fd = new MultipartForm();
+    fd.append('file', buffer, { filename, contentType: mimetype });
+    const res = await axios.post('https://0x0.st', fd, {
+      headers: { ...fd.getHeaders(), 'User-Agent': 'Kira-MD/1.0' },
+      timeout: 60000,
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity,
+      validateStatus: () => true
     });
-    const text = (await res.text()).trim();
-    if (res.ok && /^https?:\/\//i.test(text)) return text;
+    const text = String(res.data || '').trim();
+    if (res.status >= 200 && res.status < 300 && /^https?:\/\//i.test(text)) return text;
   } catch (_) {}
 
   try {
-    const fd = new FormData();
-    fd.append('file', new Blob([buffer], { type: mimetype }), filename);
-    const res = await fetch('https://tmpfiles.org/api/v1/upload', {
-      method: 'POST', body: fd, signal: AbortSignal.timeout(60000)
+    const fd = new MultipartForm();
+    fd.append('file', buffer, { filename, contentType: mimetype });
+    const res = await axios.post('https://tmpfiles.org/api/v1/upload', fd, {
+      headers: { ...fd.getHeaders(), 'User-Agent': 'Kira-MD/1.0' },
+      timeout: 60000,
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity,
+      validateStatus: () => true
     });
-    const result = await res.json().catch(() => null);
+    const result = typeof res.data === 'object' ? res.data : null;
     const uploaded = result?.data?.url || result?.url || '';
-    if (res.ok && /^https?:\/\/tmpfiles\.org\//i.test(uploaded)) {
+    if (res.status >= 200 && res.status < 300 && /^https?:\/\/tmpfiles\.org\//i.test(uploaded)) {
       const normalized = uploaded.replace('://tmpfiles.org/', '://tmpfiles.org/dl/');
       return await resolveTmpfilesDirectUrl(normalized);
     }
@@ -133,15 +166,17 @@ function vyroAiRequest(imageBuffer, operation) {
 
 async function handleMediaUrl(args, sock, jid, isGroup, sender, message, forceCatbox = false) {
   const ctx = getCtx(message);
-  const quotedRaw = ctx?.quotedMessage;
-  const quoted = quotedRaw ? unwrapMessage({ message: quotedRaw }) : null;
+  const quotedRaw = ctx?.quotedMessage || null;
+  const quoted = quotedRaw ? unwrapMessage({ message: quotedRaw }) : unwrapMessage(message);
   const mediaType = getMessageType(quoted) || ctx?.mediaType;
   const media = quoted && mediaType && /^(image|video|audio|document)Message$/.test(mediaType);
   const commandLabel = forceCatbox ? '*.url*' : '*.tourl*';
-  if (!media) return sock.sendMessage(jid, { text: `🔗 Reply to an image, video, audio, or document with ${commandLabel}.` });
+  if (!media) return sock.sendMessage(jid, { text: `🔗 Reply to, or send, an image, video, audio, or document with ${commandLabel}.` });
   await sock.sendMessage(jid, { text: '📤 Downloading and uploading your media...' });
   try {
-    const buf = await dlQuoted(sock, jid, message, quoted);
+    const buf = quotedRaw
+      ? await dlQuoted(sock, jid, message, quotedRaw)
+      : await downloadMediaMessage(message, 'buffer', { reuploadRequest: sock.updateMediaMessage });
     if (!Buffer.isBuffer(buf) || !buf.length) throw new Error('WhatsApp returned an empty media file');
     const payload = quoted[mediaType] || {};
     const mimetype = payload.mimetype || ({
@@ -152,11 +187,21 @@ async function handleMediaUrl(args, sock, jid, isGroup, sender, message, forceCa
     const ext = rawName.includes('.') ? rawName.slice(rawName.lastIndexOf('.')) :
       ({ imageMessage: '.jpg', videoMessage: '.mp4', audioMessage: '.mp3', documentMessage: '.bin' }[mediaType] || '.bin');
     const safeName = `kira_${Date.now()}${ext.replace(/[^.a-z0-9]/gi, '')}`;
-    const url = forceCatbox
-      ? await uploadToCatbox(buf, safeName, mimetype)
-      : await uploadToPublicUrl(buf, safeName, mimetype);
+    let url;
+    let uploadService = forceCatbox ? 'Catbox' : 'public upload service';
+    if (forceCatbox) {
+      try {
+        url = await uploadToCatbox(buf, safeName, mimetype);
+      } catch (_) {
+        // Keep .url useful when Catbox rate-limits or rejects anonymous uploads.
+        url = await uploadToPublicUrl(buf, safeName, mimetype);
+        uploadService = 'public upload fallback';
+      }
+    } else {
+      url = await uploadToPublicUrl(buf, safeName, mimetype);
+    }
     await sock.sendMessage(jid, {
-      text: `🔗 *Upload Complete!*\n\n${url}\n\n_File type:_ ${mimetype}\n_Size:_ ${buf.length} bytes\n\n_Click the link to access your file._`
+      text: `🔗 *Upload Complete!*\n\n${url}\n\n_File type:_ ${mimetype}\n_Size:_ ${buf.length} bytes\n_Service:_ ${uploadService}\n\n_Click the link to access your file._`
     });
   } catch (err) {
     const prefix = forceCatbox ? 'Catbox media upload' : 'media upload';

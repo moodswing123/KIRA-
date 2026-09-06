@@ -38,7 +38,7 @@ const report = {
   ownerOnlyCommands: ownerOnly,
   adminRestrictedCommands: adminOnly,
   groupOnlyCommands: groupOnly,
-  sudoModel: 'Sudo access is a global private-mode gate; command-level owner/admin restrictions remain enforced.'
+  sudoModel: 'Sudo users can run all non-owner commands, including admin commands; owner-only settings and sensitive controls remain owner-only.'
 };
 console.log(JSON.stringify(report, null, 2));
 assert.strictEqual(health.broken, 0, 'loader reports broken commands');

@@ -113,6 +113,15 @@ async function zstSocialUrl(url) {
   return zstlab.firstUrl(await zstlab.get('/api/v1/media/social', { url }));
 }
 
+async function zstYoutubeDownloadUrl(url, quality = '720', format = 'video') {
+  const result = await zstlab.get('/api/v1/youtube/download', {
+    url,
+    quality,
+    format
+  });
+  return zstlab.firstUrl(result);
+}
+
 async function zstYoutubeSearchUrl(query) {
   const result = await zstlab.get('/api/v1/youtube/search-download', { q: query, limit: '5' });
   const first = Array.isArray(result.videos) ? result.videos[0] : null;
@@ -139,8 +148,7 @@ const downloadCommands = {
       try {
         if (zstlab.isConfigured()) {
           try {
-            const result = await zstlab.get('/api/v1/youtube/download', { url, quality });
-            const downloadUrl = zstlab.firstUrl(result);
+            const downloadUrl = await zstYoutubeDownloadUrl(url, quality, 'video');
             if (!downloadUrl) throw new Error('ZSTLAB returned no YouTube download URL');
             await sock.sendMessage(jid, { text: `📹 *YouTube Download Ready*\n\n🔗 ${downloadUrl}${WATERMARK}` });
             return;
@@ -186,6 +194,18 @@ const downloadCommands = {
       await sock.sendMessage(jid, { text: `🎵 *Extracting audio...*\n\n🔗 ${url}\n⏳ Please wait...` });
       let tempFile = null;
       try {
+        if (zstlab.isConfigured()) {
+          try {
+            const downloadUrl = await zstYoutubeDownloadUrl(url, '720', 'audio');
+            if (!downloadUrl) throw new Error('ZSTLAB returned no YouTube audio URL');
+            await sock.sendMessage(jid, {
+              text: `🎵 *YouTube MP3 Ready*\n\n🔗 *Download Link:*\n${downloadUrl}\n\n_Click to download MP3._${WATERMARK}`
+            });
+            return;
+          } catch (zstErr) {
+            console.warn('[ZSTLAB] YouTube audio download failed; using local/public fallback:', zstErr.message);
+          }
+        }
         if (await ytDlpAvailable()) {
           tempFile = await ytDlpDownload(url, 'audio');
           const buf  = fs.readFileSync(tempFile);

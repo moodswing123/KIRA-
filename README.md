@@ -133,6 +133,7 @@ Copy `.env.example` to `.env`, then fill in the values you need. Keep the `.env`
 | Variable | Used by | Required |
 |----------|---------|----------|
 | `ZSTLAB_API_KEY` | ZSTLAB-backed YouTube, social-media, Spotify, MediaFire, Pinterest, and search/download routes | Optional |
+| `ZSTLAB_API_BASE_URL` | ZSTLAB API host | `https://api.zstlab.cyou` |
 
 Most downloader commands also have public-service, Cobalt, TikWM, HTML-extraction, or local `yt-dlp` fallbacks. Therefore, a missing `ZSTLAB_API_KEY` does not necessarily prevent every download command from working, but it disables the ZSTLAB route.
 

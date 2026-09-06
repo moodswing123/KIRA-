@@ -81,7 +81,7 @@ async function applyBotMode(mode, sock, jid, botConfig) {
 const ownerCommands = {
   owner: {
     category: 'general', desc: 'Show bot owner information',
-    usage: '.owner', aliases: [], permissions: 'all',
+    usage: '.owner', aliases: [], permissions: 'owner',
     examples: ['.owner'],
     exec: async (args, sock, jid, isGroup, sender, message, botConfig) => {
       const cfg = botConfig || global.botConfig || {};

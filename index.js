@@ -340,6 +340,27 @@ function printBanner() {
 // ── Main connection ────────────────────────────────────────────────────────
 let reconnectTimer = null;
 let activeSocket = null;
+let cachedBaileysVersion = null;
+let cachedBaileysVersionAt = 0;
+
+async function getBaileysVersion() {
+  const cacheAge = Date.now() - cachedBaileysVersionAt;
+  if (cachedBaileysVersion && cacheAge < 10 * 60 * 1000) {
+    return cachedBaileysVersion;
+  }
+
+  try {
+    const { version } = await fetchLatestBaileysVersion();
+    cachedBaileysVersion = version;
+    cachedBaileysVersionAt = Date.now();
+    return version;
+  } catch (error) {
+    // A reconnect should not wait on the version endpoint when a recent
+    // version is already known.
+    if (cachedBaileysVersion) return cachedBaileysVersion;
+    throw error;
+  }
+}
 
 function scheduleReconnect() {
   if (reconnectTimer) return;
@@ -354,7 +375,7 @@ function scheduleReconnect() {
 
 async function connectToWhatsApp() {
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
-  const { version }          = await fetchLatestBaileysVersion();
+  const version              = await getBaileysVersion();
 
   log(`Using Baileys v${version.join('.')}`);
 
@@ -367,6 +388,8 @@ async function connectToWhatsApp() {
     syncFullHistory:                false,
     markOnlineOnConnect:            false,
     generateHighQualityLinkPreview: false,
+    connectTimeoutMs:               30000,
+    defaultQueryTimeoutMs:          30000,
     // Return undefined when we don't have a cached message — safe for v7
     getMessage: async (key) => {
       return findStoredMessage(key.remoteJid, key.id) || undefined;
@@ -403,7 +426,7 @@ async function connectToWhatsApp() {
       // The socket must have had time to initialise its WebSocket before the
       // pairing request. Do not depend on waitForConnectionUpdate: that helper
       // is not present in every Baileys release and can race the event stream.
-      await wait(4000);
+      await wait(Number(process.env.PAIRING_CODE_WAIT_MS || 2500));
       if (state.creds.registered || pairingCodeDisplayed) return;
       const code = await sock.requestPairingCode(pairingNumber);
       pairingCodeDisplayed = true;
@@ -432,7 +455,7 @@ async function connectToWhatsApp() {
       warn('OWNER_NUMBER is invalid — use the full number with country code, for example 2347038253086');
     } else {
       // Schedule only after the socket and all event handlers below are set up.
-      pairingTimer = setTimeout(() => requestPairingCode(), 1500);
+      pairingTimer = setTimeout(() => requestPairingCode(), 1000);
     }
   } else if (!state.creds.registered && !pairingNumber) {
     warn('OWNER_NUMBER not set in .env — set it so a pairing code can be generated');
@@ -793,11 +816,14 @@ async function handleMessage(sock, message) {
 
   // ── Execute command ───────────────────────────────────────────────────
   try {
+    const commandTimeoutMs = Number(handler.commandTimeoutMs) > 0
+      ? Number(handler.commandTimeoutMs)
+      : COMMAND_HANDLER_TIMEOUT_MS;
     await helpers.withCommandContext(
       { command: `.${command}`, sender, jid },
       () => withTimeout(
         () => handler.exec(args, sock, jid, isGroup, sender, message, botConfig, chatContext),
-        COMMAND_HANDLER_TIMEOUT_MS,
+        commandTimeoutMs,
         `.${command} command`
       )
     );

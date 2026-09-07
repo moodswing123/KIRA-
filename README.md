@@ -53,7 +53,15 @@ Edit `.env` and set your **OWNER_NUMBER** (your WhatsApp number with country cod
 OWNER_NUMBER=2347038253086
 OWNER_NAME=Victory Tech
 BOT_MODE=public
+APIFY_API_TOKEN=your_apify_token
 ```
+
+`APIFY_API_TOKEN` is required for every downloader except `.tiktok` and
+`.tiktokmp3`. Keep the token private and never commit your `.env` file.
+
+The bot caches the Baileys version between reconnects, skips full history
+replay, and requests the first pairing code sooner. If your network needs more
+startup time, increase `PAIRING_CODE_WAIT_MS` in `.env`.
 
 ### 4. Start the Bot
 ```bash
@@ -132,10 +140,15 @@ Copy `.env.example` to `.env`, then fill in the values you need. Keep the `.env`
 
 | Variable | Used by | Required |
 |----------|---------|----------|
-| `ZSTLAB_API_KEY` | ZSTLAB-backed YouTube, social-media, Spotify, MediaFire, Pinterest, and search/download routes | Optional |
+| `APIFY_API_TOKEN` | All non-TikTok downloader commands through `easyapi/all-in-one-media-downloader` | Required for non-TikTok downloads |
+| `APIFY_ACTOR_ID` | Optional Apify Actor override | `easyapi~all-in-one-media-downloader` |
+| `APIFY_USE_PROXY` | Enables the Apify proxy for Actor runs | `false` |
+| `APIFY_PROXY_GROUPS` | Apify proxy groups when proxy use is enabled | `RESIDENTIAL` |
+| `APIFY_TIMEOUT_MS` | Maximum time to wait for an Apify run | `300000` |
+| `ZSTLAB_API_KEY` | Legacy ZSTLAB features outside the downloader module | Optional |
 | `ZSTLAB_API_BASE_URL` | ZSTLAB API host | `https://api.zstlab.cyou` |
 
-Most downloader commands also have public-service, Cobalt, TikWM, HTML-extraction, or local `yt-dlp` fallbacks. Therefore, a missing `ZSTLAB_API_KEY` does not necessarily prevent every download command from working, but it disables the ZSTLAB route.
+The `.tiktok` and `.tiktokmp3` commands intentionally remain on their existing TikWM implementation. All other downloader commands use Apify and send the resolved media directly through WhatsApp when the file is within the configured size limit; otherwise they return the Apify direct link.
 
 ### Optional image-processing providers
 

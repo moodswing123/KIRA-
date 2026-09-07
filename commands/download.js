@@ -1,81 +1,68 @@
 'use strict';
 // commands/download.js — Download commands for Kira MD
 // All downloads append "Powered by Victory Tech™" watermark
-const { exec } = require('child_process');
-const { promisify } = require('util');
-const fs    = require('fs');
-const path  = require('path');
-const os    = require('os');
 const axios = require('axios');
 const { commandErrorMessage } = require('../lib/helpers');
-const zstlab = require('../lib/zstlab');
-
-const execAsync     = promisify(exec);
-const { execFile }  = require('child_process');
-const execFileAsync = promisify(execFile);
+const apify = require('../lib/apify');
 
 const WATERMARK = '\n\n_Powered by Victory Tech™_';
 
-function tmpFile(ext) {
-  return path.join(os.tmpdir(), `kiramd_${Date.now()}_${Math.random().toString(36).slice(2)}${ext}`);
-}
+async function sendApifyDownload(sock, jid, link, {
+  preferredType = null,
+  caption,
+  label = 'Download'
+} = {}) {
+  const resolved = await apify.resolveMedia(link, preferredType);
+  const media = resolved.media;
 
-function assertYouTubeUrl(url) {
-  if (!/^https?:\/\/(www\.)?(youtube\.com|youtu\.be)\/[\w\-?=&#%.+/]+$/.test(url)) {
-    throw new Error('Invalid YouTube URL');
-  }
-}
+  try {
+    const { buffer, contentType } = await apify.downloadMedia(media);
+    const type = String(media.type || '').toLowerCase();
+    const extension = String(media.extension || '').toLowerCase();
+    const isAudio = type === 'audio' || contentType.startsWith('audio/') ||
+      ['mp3', 'm4a', 'aac', 'ogg', 'wav'].includes(extension);
+    const isImage = type === 'image' || contentType.startsWith('image/') ||
+      ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(extension);
+    const isVideo = type === 'video' || contentType.startsWith('video/') ||
+      ['mp4', 'webm', 'mov', 'mkv'].includes(extension);
 
-// ── cobalt.tools — multi-platform downloader ─────────────────────────────
-async function cobaltFetch(url, downloadMode = 'auto', audioFormat = 'mp3') {
-  const { data } = await axios.post(
-    'https://api.cobalt.tools/',
-    { url, downloadMode, audioFormat, filenameStyle: 'basic', quality: '720' },
-    {
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept':       'application/json',
-        'User-Agent':   'Kira-MD/1.0'
-      },
-      timeout: 30000
+    if (isAudio) {
+      await sock.sendMessage(jid, {
+        audio: buffer,
+        mimetype: contentType || 'audio/mpeg',
+        caption
+      });
+    } else if (isImage) {
+      await sock.sendMessage(jid, { image: buffer, caption });
+    } else if (isVideo) {
+      await sock.sendMessage(jid, {
+        video: buffer,
+        caption,
+        mimetype: contentType || 'video/mp4'
+      });
+    } else {
+      const filename = decodeURIComponent(
+        String(media.url).split('/').pop()?.split('?')[0] || `${label.toLowerCase()}.bin`
+      );
+      await sock.sendMessage(jid, {
+        document: buffer,
+        fileName: filename,
+        mimetype: contentType || 'application/octet-stream',
+        caption
+      });
     }
-  );
-  if (data.status === 'error') throw new Error(data.error?.code || 'cobalt error');
-  if (data.status === 'picker') {
-    const item   = Array.isArray(data.picker) ? data.picker[0] : null;
-    const picked = item?.url || item?.thumb || null;
-    if (!picked) throw new Error('cobalt returned an empty picker list');
-    return picked;
+  } catch (downloadError) {
+    // Keep the command useful when WhatsApp cannot accept a large asset:
+    // return the Apify-hosted link instead of dropping the result.
+    await sock.sendMessage(jid, {
+      text:
+        `${caption}\n\n` +
+        `🔗 *Direct Link:*\n${media.url}\n\n` +
+        `_The media was resolved by Apify but could not be attached here: ${downloadError.message}_`
+    });
   }
-  const resolved = typeof data.url === 'string' ? data.url
-                 : Array.isArray(data.url)       ? data.url[0]
-                 : null;
-  if (!resolved) throw new Error('cobalt returned no usable URL');
-  return resolved;
-}
 
-// ── yt-dlp helper ─────────────────────────────────────────────────────────
-async function ytDlpAvailable() {
-  try { await execFileAsync('yt-dlp', ['--version']); return true; } catch { return false; }
-}
-
-async function ytDlpDownload(url, format = 'audio', quality = '720') {
-  assertYouTubeUrl(url);
-  const outTemplate = tmpFile('');
-  const clientArgs  = ['--extractor-args', 'youtube:player_client=android,web'];
-  const args = format === 'audio'
-    ? ['-x', '--audio-format', 'mp3', '--audio-quality', '5',
-       '-o', outTemplate + '.%(ext)s', url,
-       '--no-playlist', '--max-filesize', '90m', ...clientArgs]
-    : ['-f', `best[height<=${quality}][ext=mp4]/best[height<=${quality}]/best[ext=mp4]/best`,
-       '-o', outTemplate + '.%(ext)s', url,
-       '--no-playlist', '--max-filesize', '90m', ...clientArgs];
-  await execFileAsync('yt-dlp', args, { timeout: 180000 });
-  const dir   = path.dirname(outTemplate);
-  const base  = path.basename(outTemplate);
-  const found = fs.readdirSync(dir).find(f => f.startsWith(base) && f !== base);
-  if (!found) throw new Error('yt-dlp produced no output file');
-  return path.join(dir, found);
+  return media;
 }
 
 // ── TikTok via tikwm.com ──────────────────────────────────────────────────
@@ -99,42 +86,10 @@ async function tikwmFetch(url) {
   };
 }
 
-// ── MediaFire ─────────────────────────────────────────────────────────────
-async function mediaFireDl(url) {
-  const { data: html } = await axios.get(url, {
-    headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 15000
-  });
-  const match = html.match(/href="(https?:\/\/download\d*\.mediafire\.com\/[^"]+)"/);
-  if (!match) throw new Error('Could not extract MediaFire download link');
-  return match[1];
-}
-
-async function zstSocialUrl(url) {
-  return zstlab.firstUrl(await zstlab.get('/api/v1/media/social', { url }));
-}
-
-async function zstYoutubeDownloadUrl(url, quality = '720', format = 'video') {
-  const result = await zstlab.get('/api/v1/youtube/download', {
-    url,
-    quality,
-    format
-  });
-  return zstlab.firstUrl(result);
-}
-
-async function zstYoutubeSearchUrl(query) {
-  const result = await zstlab.get('/api/v1/youtube/search-download', { q: query, limit: '5' });
-  const first = Array.isArray(result.videos) ? result.videos[0] : null;
-  if (!first?.downloadEndpoint) throw new Error('ZSTLAB returned no YouTube result');
-  const endpoint = new URL(first.downloadEndpoint, zstlab.BASE_URL);
-  const resolved = await zstlab.get(endpoint.pathname, Object.fromEntries(endpoint.searchParams));
-  return zstlab.firstUrl(resolved);
-}
-
 const downloadCommands = {
   // ── YouTube Video ────────────────────────────────────────────────────────
   ytdl: {
-    category: 'downloader', desc: 'Download YouTube video',
+    category: 'downloader', commandTimeoutMs: 180000, desc: 'Download YouTube video',
     usage: '.ytdl <url> [quality]', aliases: ['yt', 'youtube', 'ytv'], permissions: 'all',
     examples: ['.ytdl https://youtu.be/xxxxx', '.ytdl https://youtu.be/xxxxx 360'],
     exec: async (args, sock, jid) => {
@@ -144,46 +99,21 @@ const downloadCommands = {
         return sock.sendMessage(jid, { text: `📹 *YouTube Downloader*\n\nUsage: *.ytdl <url>*\nExample: *.ytdl https://youtu.be/xxxxx*${WATERMARK}` });
       }
       await sock.sendMessage(jid, { text: `📹 *Downloading YouTube video...*\n\n🔗 ${url}\n⏳ Please wait...` });
-      let tempFile = null;
       try {
-        if (zstlab.isConfigured()) {
-          try {
-            const downloadUrl = await zstYoutubeDownloadUrl(url, quality, 'video');
-            if (!downloadUrl) throw new Error('ZSTLAB returned no YouTube download URL');
-            await sock.sendMessage(jid, { text: `📹 *YouTube Download Ready*\n\n🔗 ${downloadUrl}${WATERMARK}` });
-            return;
-          } catch (zstErr) {
-            console.warn('[ZSTLAB] YouTube download failed; using local/public fallback:', zstErr.message);
-          }
-        }
-        if (await ytDlpAvailable()) {
-          tempFile = await ytDlpDownload(url, 'video', quality);
-          const buf  = fs.readFileSync(tempFile);
-          await sock.sendMessage(jid, {
-            video:   buf,
-            caption: `📹 *YouTube Video*\n\n🔗 ${url}${WATERMARK}`,
-            mimetype: 'video/mp4'
-          });
-        } else {
-          const dlUrl = await cobaltFetch(url, 'auto');
-          await sock.sendMessage(jid, {
-            text:
-              `📹 *YouTube Download Ready*\n\n` +
-              `🔗 *Direct Link:*\n${dlUrl}\n\n` +
-              `_Click to download — link expires soon._${WATERMARK}`
-          });
-        }
+        await sendApifyDownload(sock, jid, url, {
+          preferredType: 'video',
+          label: `YouTube ${quality}p video`,
+          caption: `📹 *YouTube Video*\n\n🔗 ${url}${WATERMARK}`
+        });
       } catch (err) {
         await sock.sendMessage(jid, { text: commandErrorMessage('YouTube download', err, { jid }) });
-      } finally {
-        if (tempFile) try { fs.unlinkSync(tempFile); } catch {}
       }
     }
   },
 
   // ── YouTube Audio (MP3) ──────────────────────────────────────────────────
   ytmp3: {
-    category: 'downloader', desc: 'Download YouTube video as MP3 audio',
+    category: 'downloader', commandTimeoutMs: 180000, desc: 'Download YouTube video as MP3 audio',
     usage: '.ytmp3 <url>', aliases: ['ymp3', 'ytaudio', 'ytsong'], permissions: 'all',
     examples: ['.ytmp3 https://youtu.be/xxxxx'],
     exec: async (args, sock, jid) => {
@@ -192,66 +122,28 @@ const downloadCommands = {
         return sock.sendMessage(jid, { text: `🎵 *YouTube MP3*\n\nUsage: *.ytmp3 <url>*${WATERMARK}` });
       }
       await sock.sendMessage(jid, { text: `🎵 *Extracting audio...*\n\n🔗 ${url}\n⏳ Please wait...` });
-      let tempFile = null;
       try {
-        if (zstlab.isConfigured()) {
-          try {
-            const downloadUrl = await zstYoutubeDownloadUrl(url, '720', 'audio');
-            if (!downloadUrl) throw new Error('ZSTLAB returned no YouTube audio URL');
-            await sock.sendMessage(jid, {
-              text: `🎵 *YouTube MP3 Ready*\n\n🔗 *Download Link:*\n${downloadUrl}\n\n_Click to download MP3._${WATERMARK}`
-            });
-            return;
-          } catch (zstErr) {
-            console.warn('[ZSTLAB] YouTube audio download failed; using local/public fallback:', zstErr.message);
-          }
-        }
-        if (await ytDlpAvailable()) {
-          tempFile = await ytDlpDownload(url, 'audio');
-          const buf  = fs.readFileSync(tempFile);
-          await sock.sendMessage(jid, {
-            audio:    buf,
-            mimetype: 'audio/mpeg',
-            caption:  `🎵 *YouTube Audio*\n\n🔗 ${url}${WATERMARK}`
-          });
-        } else {
-          const dlUrl = await cobaltFetch(url, 'audio', 'mp3');
-          await sock.sendMessage(jid, {
-            text:
-              `🎵 *YouTube MP3 Ready*\n\n` +
-              `🔗 *Download Link:*\n${dlUrl}\n\n` +
-              `_Click to download MP3._${WATERMARK}`
-          });
-        }
+        await sendApifyDownload(sock, jid, url, {
+          preferredType: 'audio',
+          label: 'YouTube MP3',
+          caption: `🎵 *YouTube Audio*\n\n🔗 ${url}${WATERMARK}`
+        });
       } catch (err) {
         await sock.sendMessage(jid, { text: commandErrorMessage('YouTube MP3 download', err, { jid }) });
-      } finally {
-        if (tempFile) try { fs.unlinkSync(tempFile); } catch {}
       }
     }
   },
 
   // ── YouTube Search + Play ────────────────────────────────────────────────
   play: {
-    category: 'downloader', desc: 'Search YouTube and download the top result as audio',
+    category: 'downloader', commandTimeoutMs: 180000, desc: 'Search YouTube and download the top result as audio',
     usage: '.play <song name>', aliases: ['song', 'music'], permissions: 'all',
     examples: ['.play Wizkid Essence', '.play Burna Boy Last Last'],
     exec: async (args, sock, jid) => {
       const query = args.join(' ').trim();
       if (!query) return sock.sendMessage(jid, { text: `🎵 *Play*\n\nUsage: *.play <song name>*${WATERMARK}` });
       await sock.sendMessage(jid, { text: `🔍 *Searching:* _"${query}"_...` });
-      let tempFile = null;
       try {
-        if (zstlab.isConfigured()) {
-          try {
-            const downloadUrl = await zstYoutubeSearchUrl(query);
-            if (!downloadUrl) throw new Error('ZSTLAB returned no playable URL');
-            await sock.sendMessage(jid, { text: `🎵 *${query}*\n\n🔗 ${downloadUrl}${WATERMARK}` });
-            return;
-          } catch (zstErr) {
-            console.warn('[ZSTLAB] YouTube search failed; using local/public fallback:', zstErr.message);
-          }
-        }
         // Search via YouTube oEmbed / search scrape
         const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
         const { data: html } = await axios.get(searchUrl, {
@@ -262,22 +154,13 @@ const downloadCommands = {
         const videoId  = match[1];
         const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
         await sock.sendMessage(jid, { text: `🎵 *Found! Downloading...*\n\n🔗 ${videoUrl}` });
-        if (await ytDlpAvailable()) {
-          tempFile = await ytDlpDownload(videoUrl, 'audio');
-          const buf = fs.readFileSync(tempFile);
-          await sock.sendMessage(jid, {
-            audio:    buf,
-            mimetype: 'audio/mpeg',
-            caption:  `🎵 *${query}*\n\n🔗 ${videoUrl}${WATERMARK}`
-          });
-        } else {
-          const dlUrl = await cobaltFetch(videoUrl, 'audio', 'mp3');
-          await sock.sendMessage(jid, { text: `🎵 *${query}*\n\n🔗 ${dlUrl}${WATERMARK}` });
-        }
+        await sendApifyDownload(sock, jid, videoUrl, {
+          preferredType: 'audio',
+          label: query,
+          caption: `🎵 *${query}*\n\n🔗 ${videoUrl}${WATERMARK}`
+        });
       } catch (err) {
         await sock.sendMessage(jid, { text: commandErrorMessage('play download', err, { jid }) });
-      } finally {
-        if (tempFile) try { fs.unlinkSync(tempFile); } catch {}
       }
     }
   },
@@ -340,7 +223,7 @@ const downloadCommands = {
 
   // ── Instagram ────────────────────────────────────────────────────────────
   igdl: {
-    category: 'downloader', desc: 'Download Instagram post, reel or story',
+    category: 'downloader', commandTimeoutMs: 180000, desc: 'Download Instagram post, reel or story',
     usage: '.igdl <url>', aliases: ['ig', 'instagram', 'insta'], permissions: 'all',
     examples: ['.igdl https://www.instagram.com/p/xxxxx/', '.igdl https://www.instagram.com/reel/xxxxx/'],
     exec: async (args, sock, jid) => {
@@ -350,24 +233,10 @@ const downloadCommands = {
       }
       await sock.sendMessage(jid, { text: `📸 *Downloading from Instagram...*\n\n⏳ Please wait...` });
       try {
-        let dlUrl;
-        if (zstlab.isConfigured()) {
-          try { dlUrl = await zstSocialUrl(url); }
-          catch (zstErr) { console.warn('[ZSTLAB] Social download failed; using Cobalt fallback:', zstErr.message); }
-        }
-        if (!dlUrl) dlUrl = await cobaltFetch(url, 'auto');
-        const resp  = await axios.get(dlUrl, { responseType: 'arraybuffer', timeout: 60000, headers: { 'User-Agent': 'Mozilla/5.0' } });
-        const ct    = resp.headers['content-type'] || '';
-        const buf   = Buffer.from(resp.data);
-        if (ct.startsWith('video/') || ct.includes('mp4')) {
-          await sock.sendMessage(jid, {
-            video: buf, caption: `📸 *Instagram Video*\n\n🔗 ${url}${WATERMARK}`, mimetype: 'video/mp4'
-          });
-        } else {
-          await sock.sendMessage(jid, {
-            image: buf, caption: `📸 *Instagram Photo*\n\n🔗 ${url}${WATERMARK}`
-          });
-        }
+        await sendApifyDownload(sock, jid, url, {
+          label: 'Instagram media',
+          caption: `📸 *Instagram Download*\n\n🔗 ${url}${WATERMARK}`
+        });
       } catch (err) {
         await sock.sendMessage(jid, { text: commandErrorMessage('Instagram download', err, { jid }) });
       }
@@ -376,7 +245,7 @@ const downloadCommands = {
 
   // ── Facebook ─────────────────────────────────────────────────────────────
   fbdl: {
-    category: 'downloader', desc: 'Download Facebook video',
+    category: 'downloader', commandTimeoutMs: 180000, desc: 'Download Facebook video',
     usage: '.fbdl <url>', aliases: ['fb', 'facebook'], permissions: 'all',
     examples: ['.fbdl https://www.facebook.com/watch?v=123456'],
     exec: async (args, sock, jid) => {
@@ -386,16 +255,10 @@ const downloadCommands = {
       }
       await sock.sendMessage(jid, { text: `📘 *Downloading Facebook video...*\n\n⏳ Please wait...` });
       try {
-        let dlUrl;
-        if (zstlab.isConfigured()) {
-          try { dlUrl = await zstSocialUrl(url); }
-          catch (zstErr) { console.warn('[ZSTLAB] Social download failed; using Cobalt fallback:', zstErr.message); }
-        }
-        if (!dlUrl) dlUrl = await cobaltFetch(url, 'auto');
-        const resp  = await axios.get(dlUrl, { responseType: 'arraybuffer', timeout: 60000, headers: { 'User-Agent': 'Mozilla/5.0' } });
-        const buf   = Buffer.from(resp.data);
-        await sock.sendMessage(jid, {
-          video: buf, caption: `📘 *Facebook Video*\n\n🔗 ${url}${WATERMARK}`, mimetype: 'video/mp4'
+        await sendApifyDownload(sock, jid, url, {
+          preferredType: 'video',
+          label: 'Facebook video',
+          caption: `📘 *Facebook Video*\n\n🔗 ${url}${WATERMARK}`
         });
       } catch (err) {
         await sock.sendMessage(jid, { text: commandErrorMessage('Facebook download', err, { jid }) });
@@ -405,7 +268,7 @@ const downloadCommands = {
 
   // ── Twitter / X ───────────────────────────────────────────────────────────
   twitter: {
-    category: 'downloader', desc: 'Download Twitter/X video or GIF',
+    category: 'downloader', commandTimeoutMs: 180000, desc: 'Download Twitter/X video or GIF',
     usage: '.twitter <url>', aliases: ['twit', 'xdl', 'tweet'], permissions: 'all',
     examples: ['.twitter https://twitter.com/user/status/123456789'],
     exec: async (args, sock, jid) => {
@@ -415,16 +278,10 @@ const downloadCommands = {
       }
       await sock.sendMessage(jid, { text: `🐦 *Downloading from Twitter/X...*` });
       try {
-        let dlUrl;
-        if (zstlab.isConfigured()) {
-          try { dlUrl = await zstSocialUrl(url); }
-          catch (zstErr) { console.warn('[ZSTLAB] Social download failed; using Cobalt fallback:', zstErr.message); }
-        }
-        if (!dlUrl) dlUrl = await cobaltFetch(url, 'auto');
-        const resp  = await axios.get(dlUrl, { responseType: 'arraybuffer', timeout: 60000, headers: { 'User-Agent': 'Mozilla/5.0' } });
-        const buf   = Buffer.from(resp.data);
-        await sock.sendMessage(jid, {
-          video: buf, caption: `🐦 *Twitter/X Video*\n\n🔗 ${url}${WATERMARK}`, mimetype: 'video/mp4'
+        await sendApifyDownload(sock, jid, url, {
+          preferredType: 'video',
+          label: 'Twitter/X video',
+          caption: `🐦 *Twitter/X Video*\n\n🔗 ${url}${WATERMARK}`
         });
       } catch (err) {
         await sock.sendMessage(jid, { text: commandErrorMessage('Twitter download', err, { jid }) });
@@ -434,14 +291,13 @@ const downloadCommands = {
 
   // ── Spotify (metadata + YouTube audio) ──────────────────────────────────
   spotify: {
-    category: 'downloader', desc: 'Download Spotify track audio via YouTube',
+    category: 'downloader', commandTimeoutMs: 180000, desc: 'Download Spotify track audio via YouTube',
     usage: '.spotify <url or song name>', aliases: ['sp', 'spot'], permissions: 'all',
     examples: ['.spotify https://open.spotify.com/track/xxxx', '.spotify Davido FEM'],
     exec: async (args, sock, jid) => {
       const input = args.join(' ').trim();
       if (!input) return sock.sendMessage(jid, { text: `🎧 *Spotify Downloader*\n\nUsage: *.spotify <track url or song name>*${WATERMARK}` });
       await sock.sendMessage(jid, { text: `🎧 *Searching for track...*\n\n_"${input}"_` });
-      let tempFile = null;
       try {
         // Extract song title from Spotify URL or use raw query
         let query = input;
@@ -452,46 +308,26 @@ const downloadCommands = {
           const { data } = await axios.get(`https://open.spotify.com/oembed?url=${encodeURIComponent(input)}`, { timeout: 10000 });
           query = data.title || id;
         }
-        if (zstlab.isConfigured() && input.includes('spotify.com/track/')) {
-          try {
-            const result = await zstlab.get('/api/v1/download/spotify', { url: input });
-            const downloadUrl = zstlab.firstUrl(result);
-            if (!downloadUrl) throw new Error('ZSTLAB returned no Spotify download URL');
-            await sock.sendMessage(jid, { text: `🎧 *${query}*\n\n🔗 ${downloadUrl}${WATERMARK}` });
-            return;
-          } catch (zstErr) {
-            console.warn('[ZSTLAB] Spotify download failed; using YouTube fallback:', zstErr.message);
-          }
-        }
         // Search YouTube
         const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query + ' audio')}`;
         const { data: html } = await axios.get(searchUrl, { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 10000 });
         const match = html.match(/"videoId":"([A-Za-z0-9_-]{11})"/);
         if (!match) throw new Error('No matching song found on YouTube');
         const videoUrl = `https://www.youtube.com/watch?v=${match[1]}`;
-        if (await ytDlpAvailable()) {
-          tempFile = await ytDlpDownload(videoUrl, 'audio');
-          const buf = fs.readFileSync(tempFile);
-          await sock.sendMessage(jid, {
-            audio:    buf,
-            mimetype: 'audio/mpeg',
-            caption:  `🎧 *${query}*\n\n_Downloaded via YouTube._${WATERMARK}`
-          });
-        } else {
-          const dlUrl = await cobaltFetch(videoUrl, 'audio', 'mp3');
-          await sock.sendMessage(jid, { text: `🎧 *${query}*\n\n🔗 ${dlUrl}${WATERMARK}` });
-        }
+        await sendApifyDownload(sock, jid, videoUrl, {
+          preferredType: 'audio',
+          label: query,
+          caption: `🎧 *${query}*\n\n_Downloaded through Apify._${WATERMARK}`
+        });
       } catch (err) {
         await sock.sendMessage(jid, { text: commandErrorMessage('Spotify download', err, { jid }) });
-      } finally {
-        if (tempFile) try { fs.unlinkSync(tempFile); } catch {}
       }
     }
   },
 
   // ── MediaFire ────────────────────────────────────────────────────────────
   mediafire: {
-    category: 'downloader', desc: 'Download file from MediaFire',
+    category: 'downloader', commandTimeoutMs: 180000, desc: 'Download file from MediaFire',
     usage: '.mediafire <url>', aliases: ['mf'], permissions: 'all',
     examples: ['.mediafire https://www.mediafire.com/file/xxx'],
     exec: async (args, sock, jid) => {
@@ -501,19 +337,9 @@ const downloadCommands = {
       }
       await sock.sendMessage(jid, { text: `📁 Extracting MediaFire download link...` });
       try {
-        let dlUrl;
-        if (zstlab.isConfigured()) {
-          try { dlUrl = zstlab.firstUrl(await zstlab.get('/api/v1/download/mediafire', { url })); }
-          catch (zstErr) { console.warn('[ZSTLAB] MediaFire download failed; using page extraction fallback:', zstErr.message); }
-        }
-        if (!dlUrl) dlUrl = await mediaFireDl(url);
-        const filename = decodeURIComponent(dlUrl.split('/').pop().split('?')[0]);
-        await sock.sendMessage(jid, {
-          text:
-            `📁 *MediaFire Download Ready*\n\n` +
-            `📎 *File:* ${filename}\n\n` +
-            `🔗 *Direct Link:*\n${dlUrl}\n\n` +
-            `_Click the link to download directly._${WATERMARK}`
+        await sendApifyDownload(sock, jid, url, {
+          label: 'MediaFire file',
+          caption: `📁 *MediaFire Download*\n\n🔗 ${url}${WATERMARK}`
         });
       } catch (err) {
         await sock.sendMessage(jid, { text: commandErrorMessage('MediaFire download', err, { jid }) });
@@ -523,7 +349,7 @@ const downloadCommands = {
 
   // ── Pinterest Image ───────────────────────────────────────────────────────
   pinterest: {
-    category: 'downloader', desc: 'Download Pinterest image',
+    category: 'downloader', commandTimeoutMs: 180000, desc: 'Download Pinterest image',
     usage: '.pinterest <url>', aliases: ['pin', 'pinimg'], permissions: 'all',
     examples: ['.pinterest https://pin.it/xxxxx'],
     exec: async (args, sock, jid) => {
@@ -533,20 +359,10 @@ const downloadCommands = {
       }
       await sock.sendMessage(jid, { text: `📌 *Downloading from Pinterest...*` });
       try {
-        let dlUrl;
-        if (zstlab.isConfigured()) {
-          try { dlUrl = await zstSocialUrl(url); }
-          catch (zstErr) { console.warn('[ZSTLAB] Social download failed; using Cobalt fallback:', zstErr.message); }
-        }
-        if (!dlUrl) dlUrl = await cobaltFetch(url, 'auto');
-        const resp  = await axios.get(dlUrl, { responseType: 'arraybuffer', timeout: 30000, headers: { 'User-Agent': 'Mozilla/5.0' } });
-        const buf   = Buffer.from(resp.data);
-        const ct    = resp.headers['content-type'] || '';
-        if (ct.startsWith('video/')) {
-          await sock.sendMessage(jid, { video: buf, caption: `📌 *Pinterest Video*${WATERMARK}`, mimetype: 'video/mp4' });
-        } else {
-          await sock.sendMessage(jid, { image: buf, caption: `📌 *Pinterest Image*${WATERMARK}` });
-        }
+        await sendApifyDownload(sock, jid, url, {
+          label: 'Pinterest media',
+          caption: `📌 *Pinterest Download*\n\n🔗 ${url}${WATERMARK}`
+        });
       } catch (err) {
         await sock.sendMessage(jid, { text: commandErrorMessage('Pinterest download', err, { jid }) });
       }

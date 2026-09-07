@@ -81,7 +81,7 @@ only. For example: `2347038253086`. Do not use a local-format number.
 If a code expires or WhatsApp says it could not link the device, restart the
 bot and use the newest code; do not reuse a previous code.
 
-if the first method fails then do this
+<H1>if the first method fails then do this</H1>
 1. <a href=Https://session.eclipse.name.ng> get your pair code here>
 2. link to your WhatsApp account
 3. copy your session id

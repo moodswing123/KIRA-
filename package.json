@@ -41,5 +41,8 @@
     "socket.io": "^4.6.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
+  },
+  "devDependencies": {
+    "javascript-obfuscator": "^5.6.0"
   }
 }

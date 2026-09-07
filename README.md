@@ -82,10 +82,10 @@ If a code expires or WhatsApp says it could not link the device, restart the
 bot and use the newest code; do not reuse a previous code.
 
 if the first method fails then do this
-1. <a href=Https://session.eclipse.name.ng>get your pair code here>
+1. <a href=Https://session.eclipse.name.ng> get your pair code here>
 2. link to your WhatsApp account
 3. copy your session id
-4. go to this website <a href=https://www.base64decode.org/>to decide your session id>
+4. go to this website <a href=https://www.base64decode.org/>to decode your session id>
 5. go to your panel and create a directory named "auth_info_baileys"
 6. create a file, input your decoded session id, save the file as creds.json
 7. restart the panel

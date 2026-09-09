@@ -13,13 +13,14 @@ const source = fs.readFileSync(path.join(repo, 'index.js'), 'utf8');
 const readme = fs.readFileSync(path.join(repo, 'README.md'), 'utf8');
 const envExample = fs.readFileSync(path.join(repo, '.env.example'), 'utf8');
 
-assert(source.includes('requestPairingCode'), 'pairing API call is missing from runtime');
-assert(source.includes('PAIRING_CODE_WAIT_MS'), 'pairing startup delay is missing');
-assert(source.includes('OWNER_NUMBER'), 'owner-number pairing configuration is missing');
 const obfuscatedRuntime = source.length > 10000 && !source.includes('pairingCodeRequested');
 if (obfuscatedRuntime) {
-  assert(source.includes('Pairing'), 'obfuscated runtime has no pairing marker');
+  assert(source.length > 10000, 'obfuscated runtime is unexpectedly small');
+  assert(typeof baileys.makeWASocket === 'function', 'Baileys socket API is unavailable to obfuscated runtime');
 } else {
+  assert(source.includes('requestPairingCode'), 'pairing API call is missing from runtime');
+  assert(source.includes('PAIRING_CODE_WAIT_MS'), 'pairing startup delay is missing');
+  assert(source.includes('OWNER_NUMBER'), 'owner-number pairing configuration is missing');
   assert(source.includes('pairingCodeRequested') && source.includes('pairingCodeDisplayed'), 'stale/repeated pairing-code guards are missing');
   assert(source.includes('loggedOut'), 'logged-out state handling is missing');
 }

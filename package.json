@@ -42,6 +42,9 @@
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   },
+  "overrides": {
+    "libsignal": "6.0.0"
+  },
   "devDependencies": {
     "javascript-obfuscator": "^5.6.0"
   }

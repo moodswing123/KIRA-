@@ -59,9 +59,7 @@ APIFY_API_TOKEN=your_apify_token
 `APIFY_API_TOKEN` is required for every downloader except `.tiktok` and
 `.tiktokmp3`. Keep the token private and never commit your `.env` file.
 
-The bot caches the Baileys version between reconnects, skips full history
-replay, and requests the first pairing code sooner. If your network needs more
-startup time, increase `PAIRING_CODE_WAIT_MS` in `.env`.
+The bot uses the stable `@whiskeysockets/baileys` **6.7.22** release, caches the Baileys version between reconnects, skips full history replay, and requests the first pairing code sooner. If your network needs more startup time, increase `PAIRING_CODE_WAIT_MS` in `.env`.
 
 ### 4. Start the Bot
 ```bash
@@ -78,8 +76,7 @@ On first run:
 
 Use the full phone number with its country code in `OWNER_NUMBER`, with digits
 only. For example: `2347038253086`. Do not use a local-format number.
-If a code expires or WhatsApp says it could not link the device, restart the
-bot and use the newest code; do not reuse a previous code.
+If a code expires or WhatsApp says it could not link the device, stop the bot, remove only incomplete pairing state if no account is linked, restart it, and use the newest code; do not reuse a previous code. A real account-link test must be completed on your phone because a local diagnostic cannot authenticate a WhatsApp account.
 
 if the first method fails then do this
 1. <a href=Https://session.eclipse.name.ng> get your pair code here>

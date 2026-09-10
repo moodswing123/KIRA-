@@ -4,8 +4,13 @@
 // (args, sock, jid, rawMessage, senderJid, message, botConfig, messageContext)
 const db = require('../lib/database');
 const helpers = require('../lib/helpers');
+const fs = require('fs');
+const path = require('path');
 
 const state = new Map();
+const azaFile = path.join(__dirname, '..', 'data', 'aza-settings.json');
+const azaSettings = (() => { try { return JSON.parse(fs.readFileSync(azaFile, 'utf8')); } catch { return {}; } })();
+const saveAzaSettings = () => { fs.mkdirSync(path.dirname(azaFile), { recursive: true }); fs.writeFileSync(azaFile, JSON.stringify(azaSettings, null, 2)); };
 const setting = (key, fallback = '') => {
   try { return db.getSetting(key, fallback); } catch { return fallback; }
 };
@@ -15,7 +20,8 @@ const saveSetting = (key, value) => {
 };
 const boolArg = value => /^(on|enable|enabled|true|1)$/i.test(String(value || ''));
 const isOn = value => /^(on|enable|enabled|true|1)$/i.test(String(value || ''));
-const text = (args, start = 1) => args.slice(start).join(' ').trim();
+// The dispatcher passes only tokens after the command: .setbotname KIRA => ['KIRA'].
+const text = (args, start = 0) => args.slice(start).join(' ').trim();
 const quoted = ctx => ctx?.quotedKey || null;
 const targetJid = (args, ctx, sender) => {
   const mentioned = ctx?.quotedSender || helpers.getMentionedJid?.({ message: { extendedTextMessage: { contextInfo: { mentionedJid: [] } } } });
@@ -31,6 +37,7 @@ const deleteInvocation = async (sock, jid, raw, ctx) => {
   await deleteMessage(sock, jid, raw?.key);
 };
 const groupOnly = (jid, sock) => String(jid || '').endsWith('@g.us');
+const azaReceipt = (account, bank) => `|￣￣￣￣￣￣￣￣￣￣|\n        \n          ${account}\n                ${bank}\n             \n           \n|＿＿＿＿＿＿＿＿＿＿|\n                \\ (•◡•) / \n                  \\      / \n                   ——\n                   |     |\n                   |_   |_`;
 const adminGuard = async (sock, jid, sender, message) => {
   if (!groupOnly(jid, sock)) { await send(sock, jid, { text: '❌ This command only works in groups.' }); return false; }
   if (helpers.resolveIsOwner?.(sender, message, global.botConfig)) return true;
@@ -65,7 +72,28 @@ for (const [name, key, label] of [['setbotname', 'botName', 'bot name'], ['setow
 const reactionGifs = { slap: 'https://media.giphy.com/media/Qumf2QovTD4QxHPjy5/giphy.gif', lick: 'https://media.giphy.com/media/5tmRQlzMmsLxMvKln8/giphy.gif', kill: 'https://media.giphy.com/media/11HeubLHnQJSAU/giphy.gif', kiss: 'https://media.giphy.com/media/G3va31oEEnIkM/giphy.gif', hug: 'https://media.giphy.com/media/od5H3PmEG5EVq/giphy.gif' };
 for (const name of Object.keys(reactionGifs)) add(name, 'fun', `Send a ${name} GIF.`, (a, s, j) => send(s, j, { video: { url: reactionGifs[name] }, gifPlayback: true, caption: `@${name}`, mimetype: 'video/mp4' }));
 add('fuck', 'fun', 'Send an adult-action reaction.', (a, s, j) => send(s, j, { text: '🔞 Use a private, consent-based media command for adult content.' }));
-add('aza', 'fun', 'Send an Aza reaction.', (a, s, j) => send(s, j, { text: 'Aza! ✨' }));
+add('aza', 'fun', 'Configure and display the Aza payment details.', async (a, s, j, r, sender) => {
+  const key = sender || j;
+  const value = text(a);
+  const configured = azaSettings[key];
+  const phase = state.get(key);
+  if (phase === 'account') {
+    if (!/^\d{10}$/.test(value)) return send(s, j, { text: '❌ The account number must contain exactly 10 digits. Please send .aza <10-digit account number>.' });
+    state.set(key, { step: 'bank', account: value });
+    return send(s, j, { text: '✅ Account number received. Now send .aza <bank name>.' });
+  }
+  if (phase?.step === 'bank') {
+    if (!value || /^\d+$/.test(value)) return send(s, j, { text: '❌ Please send the bank name, for example: .aza Opay' });
+    azaSettings[key] = { account: phase.account, bank: value };
+    saveAzaSettings(); state.delete(key);
+    return send(s, j, { text: azaReceipt(phase.account, value) });
+  }
+  if (!configured) {
+    state.set(key, 'account');
+    return send(s, j, { text: 'Please enter the 10-digit account number first: .aza <account number>' });
+  }
+  return send(s, j, { text: azaReceipt(configured.account, configured.bank) });
+});
 
 add('gcid', 'group', 'Get the current group ID.', async (a, s, j) => send(s, j, { text: `🆔 ${j}` }), { chatType: 'group' });
 add('repo', 'general', 'Show the KIRA repository.', (a, s, j) => send(s, j, { text: 'Repository: https://github.com/moodswing123/KIRA-' }));
@@ -76,9 +104,9 @@ add('join', 'owner', 'Join a group by invite link.', async (a, s, j) => { const 
 add('setstickercmd', 'owner', 'Set the sticker command name.', async (a, s, j) => { const value = text(a).toLowerCase().replace(/[^a-z0-9_-]/g, ''); if (!value) return send(s, j, { text: 'Usage: .setstickercmd <command>' }); saveSetting('stickerCommand', value); return send(s, j, { text: `✅ Sticker command is now .${value}.` }); }, { permissions: 'owner' });
 add('stealstickerpack', 'sticker', 'Rename a sticker pack when creating a sticker.', (a, s, j) => send(s, j, { text: `✅ Sticker pack name: ${text(a) || 'KIRA'}` }));
 
-for (const name of ['alwaysonline']) add(name, 'owner', 'Toggle always-online presence.', async (a, s, j) => { const on = isOn(a[1]); saveSetting('alwaysOnline', on); return send(s, j, { text: `✅ Always online: ${on ? 'on' : 'off'}.` }); }, { permissions: 'owner' });
-for (const name of ['antidelete', 'antiedit']) add(name, 'moderation', `Toggle ${name}.`, async (a, s, j) => { const value = String(a[1] || '').toLowerCase(); if (!['on', 'off'].includes(value)) return send(s, j, { text: `Usage: .${name} on|off` }); saveSetting(`${name}:${j}`, value === 'on'); return send(s, j, { text: `✅ ${name}: ${value}. Note: event hooks must be enabled in the host runtime for replay behavior.` }); }, { permissions: 'admin_or_owner', chatType: 'both' });
-add('antibot', 'moderation', 'Configure bot-message moderation.', async (a, s, j, r, sender, m) => { if (!(await adminGuard(s, j, sender, m))) return; const action = String(a[1] || 'warn').toLowerCase(); if (!['warn', 'delete', 'kick', 'off'].includes(action)) return send(s, j, { text: 'Usage: .antibot warn|delete|kick|off' }); saveSetting(`antibot:${j}`, action); return send(s, j, { text: `✅ Anti-bot action: ${action}.` }); }, { permissions: 'admin' });
+for (const name of ['alwaysonline']) add(name, 'owner', 'Toggle always-online presence.', async (a, s, j) => { const on = isOn(a[0]); saveSetting('alwaysOnline', on); return send(s, j, { text: `✅ Always online: ${on ? 'on' : 'off'}.` }); }, { permissions: 'owner' });
+for (const name of ['antidelete', 'antiedit']) add(name, 'moderation', `Toggle ${name}.`, async (a, s, j) => { const value = String(a[0] || '').toLowerCase(); if (!['on', 'off'].includes(value)) return send(s, j, { text: `Usage: .${name} on|off` }); saveSetting(`${name}:${j}`, value === 'on'); return send(s, j, { text: `✅ ${name}: ${value}. Note: event hooks must be enabled in the host runtime for replay behavior.` }); }, { permissions: 'admin_or_owner', chatType: 'both' });
+add('antibot', 'moderation', 'Configure bot-message moderation.', async (a, s, j, r, sender, m) => { if (!(await adminGuard(s, j, sender, m))) return; const action = String(a[0] || 'warn').toLowerCase(); if (!['warn', 'delete', 'kick', 'off'].includes(action)) return send(s, j, { text: 'Usage: .antibot warn|delete|kick|off' }); saveSetting(`antibot:${j}`, action); return send(s, j, { text: `✅ Anti-bot action: ${action}.` }); }, { permissions: 'admin' });
 
 add('acceptall', 'group', 'Accept all pending group requests.', async (a, s, j, r, sender, m) => { if (!(await adminGuard(s, j, sender, m))) return; try { const requests = await s.groupRequestParticipantsList(j); for (const item of requests || []) await s.groupRequestParticipantsUpdate(j, [item.jid || item.id], 'approve'); return send(s, j, { text: `✅ Approved ${(requests || []).length} request(s).` }); } catch { return send(s, j, { text: '❌ WhatsApp did not expose pending join requests for this group.' }); } }, { permissions: 'admin', chatType: 'group' });
 add('kickall', 'group', 'Remove all non-admin members.', async (a, s, j, r, sender, m) => { if (!(await adminGuard(s, j, sender, m))) return; const meta = await s.groupMetadata(j); const members = meta.participants.filter(p => !p.admin && p.id !== sender).map(p => p.id); if (members.length) await s.groupParticipantsUpdate(j, members, 'remove'); return send(s, j, { text: `✅ Removed ${members.length} non-admin member(s).` }); }, { permissions: 'admin', chatType: 'group' });

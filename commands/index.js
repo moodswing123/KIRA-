@@ -78,10 +78,17 @@ function register(mod, sourceLabel) {
     }
     if (primaryCommands.has(name) || aliasCommands.has(name)) {
       const existing = primaryCommands.get(name) || aliasCommands.get(name);
+      const isPlugin = sourceLabel && !sourceLabel.startsWith('./');
+      const isLegacyCore = existing.source && existing.source.startsWith('./');
+      if (!isPlugin && !isLegacyCore && primaryCommands.has(name)) continue;
       const detail = `"${name}" (${sourceLabel || 'module'} conflicts with ${existing.source})`;
-      loadReport.duplicateNames.push(detail);
-      console.warn(`[CommandLoader] Duplicate command name ${detail} — keeping the first registration`);
-      continue;
+      if (isPlugin && isLegacyCore && primaryCommands.has(name)) {
+        primaryCommands.delete(name);
+      } else {
+        loadReport.duplicateNames.push(detail);
+        console.warn(`[CommandLoader] Duplicate command name ${detail} — keeping the first registration`);
+        continue;
+      }
     }
 
     const command = {
@@ -124,6 +131,27 @@ function register(mod, sourceLabel) {
   return registered;
 }
 
+const pluginsDir = path.join(__dirname, '../plugins');
+const pluginFiles = fs.existsSync(pluginsDir)
+  ? fs.readdirSync(pluginsDir).filter(f => f.endsWith('.js')).sort()
+  : [];
+
+for (const file of pluginFiles) {
+  try {
+    const plugin = require(path.join(pluginsDir, file));
+    const cmds = plugin.commands || plugin;
+    if (typeof cmds === 'object') {
+      const loaded = register(cmds, file);
+      loadReport.loadedModules.push({ file, commands: loaded });
+      console.log(`[Plugin] Loaded ${file} (${loaded} commands)`);
+    }
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    loadReport.failedModules.push({ file, error: reason });
+    console.error(`[Plugin] Failed to load ${file}:`, reason);
+  }
+}
+
 const coreFiles = [
   './main', './general', './ai', './download', './search',
   './converter', './tools', './group', './moderation',
@@ -141,25 +169,6 @@ for (const file of coreFiles) {
   }
 }
 
-const pluginsDir = path.join(__dirname, '../plugins');
-if (fs.existsSync(pluginsDir)) {
-  const pluginFiles = fs.readdirSync(pluginsDir).filter(f => f.endsWith('.js'));
-  for (const file of pluginFiles) {
-    try {
-      const plugin = require(path.join(pluginsDir, file));
-      const cmds   = plugin.commands || plugin;
-      if (typeof cmds === 'object') {
-        const loaded = register(cmds, file);
-        loadReport.loadedModules.push({ file, commands: loaded });
-        console.log(`[Plugin] Loaded ${file} (${loaded} commands)`);
-      }
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      loadReport.failedModules.push({ file, error: reason });
-      console.error(`[Plugin] Failed to load ${file}:`, reason);
-    }
-  }
-}
 
 for (const cat of Object.keys(categoryRegistry)) categoryRegistry[cat].sort();
 

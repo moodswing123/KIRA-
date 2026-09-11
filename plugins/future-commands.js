@@ -6,7 +6,7 @@ const db = require('../lib/database');
 const helpers = require('../lib/helpers');
 const fs = require('fs');
 const path = require('path');
-const { execFile } = require('child_process');
+const { execFile, spawn } = require('child_process');
 
 const state = new Map();
 const azaFile = path.join(__dirname, '..', 'data', 'aza-settings.json');
@@ -209,6 +209,18 @@ add('update', 'owner', 'Pull the configured repository and restart the bot.', as
     setTimeout(() => process.exit(0), 800);
     resolve();
   }));
+}, { permissions: 'owner' });
+add('restart', 'owner', 'Restart the bot without leaving a dead process.', async (a, s, j) => {
+  await send(s, j, { text: '♻️ Restarting KIRA safely…' });
+  setTimeout(() => {
+    if (typeof process.send === 'function') {
+      process.send({ type: 'restart', reason: 'chat-command' });
+      return setTimeout(() => process.exit(0), 300);
+    }
+    const child = spawn(process.execPath, process.argv.slice(1), { detached: true, stdio: 'inherit', env: process.env });
+    child.unref();
+    process.exit(0);
+  }, 500);
 }, { permissions: 'owner' });
 add('tostatus', 'owner', 'Send replied media to WhatsApp status.', async (a, s, j, r, sender, m, b, c) => {
   const media = messageMedia(c?.quotedMessage);

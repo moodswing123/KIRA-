@@ -237,4 +237,35 @@ add('gcstatus', 'group', 'Send text to the current group.', async (a, s, j, r, s
 add('listactive', 'group', 'List members by locally recorded activity.', async (a, s, j) => send(s, j, { text: 'ℹ️ Activity ranking requires message-count persistence in the host runtime. No fabricated counts are shown.' }), { chatType: 'group' });
 add('listinactive', 'group', 'List members with no locally recorded activity.', async (a, s, j) => send(s, j, { text: 'ℹ️ Inactivity ranking requires message-count persistence in the host runtime. No fabricated counts are shown.' }), { chatType: 'group' });
 
+const rpsChoices = ['rock', 'paper', 'scissors'];
+add('rps', 'games', 'Play rock, paper, scissors.', async (a, s, j) => {
+  const pick = String(a[0] || '').toLowerCase();
+  if (!rpsChoices.includes(pick)) return send(s, j, { text: 'Usage: .rps rock|paper|scissors' });
+  const bot = rpsChoices[Math.floor(Math.random() * rpsChoices.length)];
+  const result = pick === bot ? '🤝 Draw!' : ((pick === 'rock' && bot === 'scissors') || (pick === 'paper' && bot === 'rock') || (pick === 'scissors' && bot === 'paper') ? '🎉 You win!' : '😄 I win!');
+  return send(s, j, { text: `🎮 You: ${pick}\n🤖 KIRA: ${bot}\n${result}` });
+});
+add('slots', 'games', 'Spin a three-symbol slot machine.', async (a, s, j) => {
+  const symbols = ['🍒', '🔔', '⭐', '💎', '7️⃣'];
+  const roll = () => symbols[Math.floor(Math.random() * symbols.length)];
+  const row = [roll(), roll(), roll()];
+  const win = row[0] === row[1] && row[1] === row[2];
+  return send(s, j, { text: `🎰 | ${row.join(' | ')} |\n${win ? '🏆 JACKPOT!' : row[0] === row[1] || row[1] === row[2] ? '✨ Small win!' : 'Try again!'}` });
+});
+add('blackjack', 'games', 'Draw a quick blackjack hand.', async (a, s, j) => {
+  const draw = () => Math.floor(Math.random() * 10) + 1;
+  const player = [draw(), draw()]; const dealer = [draw(), draw()];
+  const sum = hand => hand.reduce((n, v) => n + v, 0); const p = sum(player); const d = sum(dealer);
+  const result = p > 21 ? '💥 Bust!' : d > 21 || p > d ? '🎉 You win!' : p === d ? '🤝 Push!' : '😄 Dealer wins!';
+  return send(s, j, { text: `🃏 Your hand: ${player.join(', ')} = ${p}\n🎴 Dealer hand: ${dealer.join(', ')} = ${d}\n${result}` });
+});
+const scrambleWords = ['javascript', 'whatsapp', 'champion', 'friendship', 'adventure', 'computer', 'sunshine'];
+add('scramble', 'games', 'Solve a scrambled word.', async (a, s, j) => {
+  const key = `scramble:${j}`; const guess = text(a).toLowerCase(); const active = state.get(key);
+  if (active && guess) { state.delete(key); return send(s, j, { text: guess === active.word ? `✅ Correct! The word was *${active.word}*.` : `❌ Not quite. The word was *${active.word}*.` }); }
+  const word = scrambleWords[Math.floor(Math.random() * scrambleWords.length)]; const chars = word.split('').sort(() => Math.random() - 0.5).join(''); state.set(key, { word });
+  return send(s, j, { text: `🔤 Unscramble this word: *${chars}*\nReply with .scramble <answer>` });
+});
+const wyrPrompts = ['Would you rather fly or breathe underwater?', 'Would you rather always be early or always be lucky?', 'Would you rather explore space or the deep ocean?', 'Would you rather have unlimited travel or unlimited free time?'];
+add('wyr', 'fun', 'Ask a would-you-rather question.', (a, s, j) => send(s, j, { text: `🤔 ${wyrPrompts[Math.floor(Math.random() * wyrPrompts.length)]}\nReply A or B and explain your choice.` }));
 module.exports = commands;

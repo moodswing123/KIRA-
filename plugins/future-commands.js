@@ -56,9 +56,9 @@ const isOwner = (sender, botConfig) => {
   const candidates = [botConfig?.ownerJid, botConfig?.ownerNumber, botConfig?.owner, process.env.OWNER_JID, process.env.OWNER_NUMBER, process.env.WA_OWNER_JIDS];
   return Boolean(senderDigits && candidates.some(value => digits(value) === senderDigits || String(value || '').split(',').some(item => digits(item) === senderDigits)));
 };
-const destinationFor = (mode, chat, botConfig) => mode === 'dm' ? ownerJid(botConfig) : chat;
+const destinationFor = (mode, chat, botConfig, preferredDm) => mode === 'dm' ? (preferredDm || ownerJid(botConfig)) : chat;
 const forwardCached = async (sock, entry, mode, botConfig, caption) => {
-  const destination = destinationFor(mode, entry.chat, botConfig);
+  const destination = destinationFor(mode, entry.chat, botConfig, entry.dmTarget);
   if (!destination || !entry.message) return;
   try { await sock.sendMessage(destination, { forward: { key: entry.key, message: entry.message }, caption }); }
   catch { await sock.sendMessage(destination, { text: `${caption}\n${messageText(entry.message) || '[media message]'}` }); }
@@ -67,9 +67,23 @@ const editedPayload = update => update?.message?.editedMessage?.message || updat
 const installEventHooks = (sock, botConfig) => {
   if (!sock?.ev || hookState.has(sock)) return;
   const cache = new Map();
-  const settings = { deleteMode: new Map(), editMode: new Map() };
+  const settings = { deleteMode: new Map(), editMode: new Map(), dmTarget: new Map() };
   sock.ev.on('messages.upsert', ({ messages = [] }) => {
     for (const msg of messages) if (msg?.key?.id && msg.message) {
+      const protocol = msg.message.protocolMessage;
+      if (protocol?.key) {
+        const target = cache.get(protocol.key.id);
+        const chat = protocol.key.remoteJid || msg.key.remoteJid || target?.chat;
+        if (protocol.type === 0) {
+          const mode = settings.deleteMode.get(chat);
+          if (target && mode) Promise.resolve(forwardCached(sock, { ...target, dmTarget: settings.dmTarget.get(chat) }, mode, botConfig, '🗑️ Deleted message')).catch(() => {});
+        } else if (protocol.editedMessage?.message) {
+          const mode = settings.editMode.get(chat);
+          if (target && mode) Promise.resolve(forwardCached(sock, { ...target, message: protocol.editedMessage.message, dmTarget: settings.dmTarget.get(chat) }, mode, botConfig, '✏️ Edited message')).catch(() => {});
+          if (target) cache.set(protocol.key.id, { ...target, message: protocol.editedMessage.message });
+        }
+        continue;
+      }
       cache.set(msg.key.id, { key: msg.key, message: msg.message, chat: msg.key.remoteJid });
       if (cache.size > 1000) cache.delete(cache.keys().next().value);
       const sticker = msg.message.stickerMessage;
@@ -87,13 +101,23 @@ const installEventHooks = (sock, botConfig) => {
   });
   sock.ev.on('messages.delete', async event => {
     const keys = event?.keys || event?.messages || (Array.isArray(event) ? event : []);
-    for (const key of keys) { const entry = cache.get(key.id); const chat = key.remoteJid || event?.jid || entry?.chat; const mode = settings.deleteMode.get(chat); if (entry && mode) await forwardCached(sock, entry, mode, botConfig, '🗑️ Deleted message'); }
+    for (const key of keys) { const entry = cache.get(key.id); const chat = key.remoteJid || event?.jid || entry?.chat; const mode = settings.deleteMode.get(chat); if (entry && mode) await forwardCached(sock, { ...entry, dmTarget: settings.dmTarget.get(chat) }, mode, botConfig, '🗑️ Deleted message'); }
   });
   sock.ev.on('messages.update', async updates => {
     for (const item of updates || []) {
-      const edited = editedPayload(item?.update); const entry = cache.get(item?.key?.id); const mode = settings.editMode.get(item?.key?.remoteJid || entry?.chat);
-      if (mode && entry && edited) await forwardCached(sock, { ...entry, message: edited }, mode, botConfig, '✏️ Edited message');
-      if (entry && edited) cache.set(item.key.id, { ...entry, message: edited });
+      const protocol = item?.update?.message?.protocolMessage;
+      const targetKey = protocol?.key || item?.key;
+      const entry = cache.get(targetKey?.id);
+      const chat = targetKey?.remoteJid || item?.key?.remoteJid || entry?.chat;
+      if (protocol?.type === 0 || (protocol?.key && !protocol.editedMessage)) {
+        const mode = settings.deleteMode.get(chat);
+        if (mode && entry) await forwardCached(sock, { ...entry, dmTarget: settings.dmTarget.get(chat) }, mode, botConfig, '🗑️ Deleted message');
+        continue;
+      }
+      const edited = protocol?.editedMessage?.message || editedPayload(item?.update);
+      const mode = settings.editMode.get(chat);
+      if (mode && entry && edited) await forwardCached(sock, { ...entry, message: edited, dmTarget: settings.dmTarget.get(chat) }, mode, botConfig, '✏️ Edited message');
+      if (entry && edited) cache.set(targetKey.id, { ...entry, message: edited });
     }
   });
   hookState.set(sock, { settings, cache });
@@ -204,6 +228,7 @@ for (const name of ['antidelete', 'antiedit']) add(name, 'moderation', `Toggle $
   if (!['on', 'off'].includes(String(a[0] || '').toLowerCase()) || (a[0].toLowerCase() === 'on' && !['dm', 'chat'].includes(mode))) return send(s, j, { text: `Usage: .${name} on dm|chat or .${name} off` });
   const hooks = hookState.get(s); const map = name === 'antidelete' ? hooks.settings.deleteMode : hooks.settings.editMode;
   map.set(j, a[0].toLowerCase() === 'on' ? mode : null);
+  if (a[0].toLowerCase() === 'on') hooks.settings.dmTarget.set(j, sender || ''); else hooks.settings.dmTarget.delete(j);
   saveSetting(`${name}:${j}`, a[0].toLowerCase() === 'on' ? mode : false);
   return send(s, j, { text: `✅ ${name}: ${a[0].toLowerCase()}${a[0].toLowerCase() === 'on' ? `; forwarding to ${mode === 'dm' ? 'your DM' : 'the originating chat'}` : ''}.` });
 }, { permissions: 'admin_or_owner', chatType: 'both' });

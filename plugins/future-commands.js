@@ -6,7 +6,9 @@ const db = require('../lib/database');
 const helpers = require('../lib/helpers');
 const fs = require('fs');
 const path = require('path');
-const { execFile, spawn } = require('child_process');
+const { execFile } = require('child_process');
+let sharp;
+try { sharp = require('sharp'); } catch {}
 
 const state = new Map();
 const azaFile = path.join(__dirname, '..', 'data', 'aza-settings.json');
@@ -26,7 +28,7 @@ const isOn = value => /^(on|enable|enabled|true|1)$/i.test(String(value || ''));
 const text = (args, start = 0) => args.slice(start).join(' ').trim();
 const quoted = ctx => ctx?.quotedKey || null;
 const targetJid = (args, ctx, sender) => {
-  const mentioned = ctx?.quotedSender || helpers.getMentionedJid?.({ message: { extendedTextMessage: { contextInfo: { mentionedJid: [] } } } });
+  const mentioned = ctx?.quotedSender || ctx?.quotedParticipant || ctx?.participant || ctx?.contextInfo?.participant;
   const rawMention = args.find(a => /@\d+/.test(a));
   if (mentioned) return mentioned;
   if (rawMention) return `${rawMention.replace(/\D/g, '')}@s.whatsapp.net`;
@@ -43,7 +45,11 @@ const azaReceipt = (account, bank) => `|￣￣￣￣￣￣￣￣￣￣|\n       
 const messageText = msg => msg?.conversation || msg?.extendedTextMessage?.text || msg?.imageMessage?.caption || msg?.videoMessage?.caption || '';
 const messageMedia = msg => msg?.imageMessage || msg?.videoMessage || msg?.audioMessage || msg?.documentMessage || msg?.stickerMessage || null;
 const quotedRaw = ctx => ctx?.quotedMessage ? { key: ctx.quotedKey, message: ctx.quotedMessage } : null;
-const ownerJid = botConfig => botConfig?.ownerJid || botConfig?.owner || process.env.OWNER_JID || process.env.OWNER_NUMBER && `${process.env.OWNER_NUMBER.replace(/\D/g, '')}@s.whatsapp.net`;
+const ownerJid = botConfig => {
+  const configured = botConfig?.ownerJid || botConfig?.owner || botConfig?.ownerNumber || process.env.OWNER_JID || process.env.OWNER_NUMBER || process.env.WA_OWNER_JIDS;
+  const first = String(configured || '').split(',')[0].trim();
+  return first ? (first.includes('@') ? first : `${first.replace(/\D/g, '')}@s.whatsapp.net`) : '';
+};
 const isOwner = (sender, botConfig) => {
   const digits = value => String(value || '').replace(/\D/g, '');
   const senderDigits = digits(sender);
@@ -57,6 +63,7 @@ const forwardCached = async (sock, entry, mode, botConfig, caption) => {
   try { await sock.sendMessage(destination, { forward: { key: entry.key, message: entry.message }, caption }); }
   catch { await sock.sendMessage(destination, { text: `${caption}\n${messageText(entry.message) || '[media message]'}` }); }
 };
+const editedPayload = update => update?.message?.editedMessage?.message || update?.message?.protocolMessage?.editedMessage?.message || update?.editedMessage?.message || update?.message;
 const installEventHooks = (sock, botConfig) => {
   if (!sock?.ev || hookState.has(sock)) return;
   const cache = new Map();
@@ -79,21 +86,21 @@ const installEventHooks = (sock, botConfig) => {
     }
   });
   sock.ev.on('messages.delete', async event => {
-    const keys = event?.keys || event?.messages || [];
-    for (const key of keys) { const entry = cache.get(key.id); const mode = settings.deleteMode.get(key.remoteJid); if (entry && mode) await forwardCached(sock, entry, mode, botConfig, '🗑️ Deleted message'); }
+    const keys = event?.keys || event?.messages || (Array.isArray(event) ? event : []);
+    for (const key of keys) { const entry = cache.get(key.id); const chat = key.remoteJid || event?.jid || entry?.chat; const mode = settings.deleteMode.get(chat); if (entry && mode) await forwardCached(sock, entry, mode, botConfig, '🗑️ Deleted message'); }
   });
   sock.ev.on('messages.update', async updates => {
     for (const item of updates || []) {
-      const mode = settings.editMode.get(item?.key?.remoteJid); const entry = cache.get(item?.key?.id);
-      if (mode && entry && item.update?.message) await forwardCached(sock, { ...entry, message: item.update.message }, mode, botConfig, '✏️ Edited message');
-      if (entry && item.update?.message) cache.set(item.key.id, { ...entry, message: item.update.message });
+      const edited = editedPayload(item?.update); const entry = cache.get(item?.key?.id); const mode = settings.editMode.get(item?.key?.remoteJid || entry?.chat);
+      if (mode && entry && edited) await forwardCached(sock, { ...entry, message: edited }, mode, botConfig, '✏️ Edited message');
+      if (entry && edited) cache.set(item.key.id, { ...entry, message: edited });
     }
   });
   hookState.set(sock, { settings, cache });
 };
 const adminGuard = async (sock, jid, sender, message) => {
   if (!groupOnly(jid, sock)) { await send(sock, jid, { text: '❌ This command only works in groups.' }); return false; }
-  if (helpers.resolveIsOwner?.(sender, message, global.botConfig)) return true;
+  if (isOwner(sender, global.botConfig) || helpers.resolveIsOwner?.(message, sender, global.botConfig)) return true;
   if (!(await helpers.isGroupAdmin(sock, jid, sender))) { await send(sock, jid, { text: '❌ Only group admins can use this command.' }); return false; }
   return true;
 };
@@ -107,7 +114,7 @@ const add = (name, category, desc, exec, extra = {}) => {
   const ownerOnly = extra.permissions === 'owner';
   const wrapped = ownerOnly ? async (...args) => {
     const [, sock, jid, , sender, message, botConfig] = args;
-    if (!isOwner(sender, botConfig) && !helpers.resolveIsOwner?.(sender, message, botConfig)) return send(sock, jid, { text: '❌ Owner permission required.' });
+    if (!isOwner(sender, botConfig) && !helpers.resolveIsOwner?.(message, sender, botConfig)) return send(sock, jid, { text: '❌ Owner permission required.' });
     return exec(...args);
   } : exec;
   commands[name] = command(category, desc, wrapped, { usage: name, ...extra, permissions: ownerOnly ? 'all' : extra.permissions });
@@ -176,9 +183,17 @@ add('setstickercmd', 'owner', 'Make replied stickers execute an existing command
 }, { permissions: 'owner' });
 add('stealsticker', 'sticker', 'Steal a sticker and use the supplied pack name.', async (a, s, j, r, sender, m, b, c) => {
   const name = text(a) || 'KIRA';
-  const legacy = require('../commands/converter').stealsticker;
-  if (legacy?.exec) return legacy.exec([name], s, j, r, sender, m, b, c);
-  return send(s, j, { text: '❌ Sticker handler is unavailable.' });
+  const sticker = c?.quotedMessage?.stickerMessage;
+  if (!sticker || !c?.quotedKey) return send(s, j, { text: '❌ Reply to a sticker to steal it.' });
+  try {
+    let buffer = await s.downloadMediaMessage({ key: c.quotedKey, message: c.quotedMessage }, 'buffer', {}, { logger: s.logger });
+    if (sharp) {
+      try { buffer = await sharp(buffer).webp({ lossless: true }).withMetadata({ exif: { IFD0: { ImageDescription: JSON.stringify({ 'sticker-pack-name': name, 'sticker-pack-publisher': b?.ownerName || b?.name || 'KIRA' }) } } }).toBuffer(); } catch {}
+    }
+    return send(s, j, { sticker: buffer, packname: name, author: b?.ownerName || b?.name || 'KIRA' });
+  } catch (error) {
+    return send(s, j, { text: '❌ Could not download that sticker. Reply directly to the sticker and try again.' });
+  }
 });
 add('stealstickerpack', 'sticker', 'Rename a sticker pack when creating a sticker.', async (a, s, j, r, sender, m, b, c) => commands.stealsticker.exec(a, s, j, r, sender, m, b, c));
 
@@ -213,13 +228,12 @@ add('update', 'owner', 'Pull the configured repository and restart the bot.', as
 add('restart', 'owner', 'Restart the bot without leaving a dead process.', async (a, s, j) => {
   await send(s, j, { text: '♻️ Restarting KIRA safely…' });
   setTimeout(() => {
+    try { if (typeof s.end === 'function') s.end(new Error('restart requested')); else s.ws?.close(); } catch {}
     if (typeof process.send === 'function') {
       process.send({ type: 'restart', reason: 'chat-command' });
-      return setTimeout(() => process.exit(0), 300);
+      return setTimeout(() => process.exit(0), 1200);
     }
-    const child = spawn(process.execPath, process.argv.slice(1), { detached: true, stdio: 'inherit', env: process.env });
-    child.unref();
-    process.exit(0);
+    process.exitCode = 0;
   }, 500);
 }, { permissions: 'owner' });
 add('tostatus', 'owner', 'Send replied media to WhatsApp status.', async (a, s, j, r, sender, m, b, c) => {

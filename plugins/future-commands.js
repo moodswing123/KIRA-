@@ -117,7 +117,7 @@ const add = (name, category, desc, exec, extra = {}) => {
     if (!isOwner(sender, botConfig) && !helpers.resolveIsOwner?.(message, sender, botConfig)) return send(sock, jid, { text: '❌ Owner permission required.' });
     return exec(...args);
   } : exec;
-  commands[name] = command(category, desc, wrapped, { usage: name, ...extra, permissions: ownerOnly ? 'all' : extra.permissions });
+  commands[name] = { ...command(category, desc, wrapped, { usage: name, ...extra, permissions: ownerOnly ? 'all' : extra.permissions }), ownerOnly };
 };
 
 add('getpp', 'utility', 'Get a user profile picture.', async (a, s, j, r, sender, m, b, c) => {

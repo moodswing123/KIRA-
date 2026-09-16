@@ -1,4 +1,4 @@
-[![Typing SVG](https://readme-typing-svg.demolab.com/?font=Fira+Code&weight=700&size=30&pause=1000&color=39FF14&center=true&vCenter=true&width=440&lines=Kira+Bot;By+Victory+Tech;Kira+Bot)](https://git.io/typing-svg)
+[![Typing SVG](https://readme-typing-svg.demolab.com/?font=Fira+Code&weight=700&size=30&pause=1000&color=39FF14&center=true&vCenter=true&width=440&lines=Kira+Bot;Powered+By+Victory+Tech;Kira+Bot)](https://git.io/typing-svg)
 
 
 # 🤖 KIRA MD — Advanced WhatsApp Bot

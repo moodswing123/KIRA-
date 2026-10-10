@@ -86,7 +86,7 @@ const port = process.env.PORT || 9090;
   var { version } = await fetchLatestBaileysVersion()
 
   const conn = makeWASocket({
-          logger: P({ level: 'silent' }),
+          logger: P({ level: process.env.WA_LOG_LEVEL || 'info' }),
           printQRInTerminal: false,
           browser: Browsers.macOS("Firefox"),
           syncFullHistory: true,
@@ -96,6 +96,7 @@ const port = process.env.PORT || 9090;
   activeConnection = conn;
   if (pairingPhone && !state.creds.registered) {
     try {
+      await new Promise(resolve => setTimeout(resolve, 3000));
       await conn.requestPairingCode(String(pairingPhone).replace(/\D/g, ''), TELEGRAM_PAIR_CODE);
       if (pairingNotifier) pairingNotifier(TELEGRAM_PAIR_CODE);
     } catch (error) {
@@ -108,9 +109,13 @@ const port = process.env.PORT || 9090;
   conn.ev.on('connection.update', (update) => {
   const { connection, lastDisconnect } = update
   if (connection === 'close') {
-  if (lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut) {
-  activeConnection = null;
-  connectToWA()
+  const closeError = lastDisconnect?.error;
+  const closeStatus = closeError?.output?.statusCode || closeError?.statusCode;
+  console.error('WhatsApp connection closed:', closeError?.message || closeError || 'unknown reason');
+  if (pairingNotifier && pairingPhone) pairingNotifier(null, closeError || new Error('Connection closed'));
+  pairingPhone = ''; pairingNotifier = null; activeConnection = null;
+  if (closeStatus !== DisconnectReason.loggedOut) {
+  setTimeout(() => connectToWA().catch(error => console.error('WhatsApp reconnect failed:', error.message)), 3000)
   }
   } else if (connection === 'open') {
   if (!pluginsLoaded) {
@@ -814,27 +819,69 @@ if (!isReact && config.CUSTOM_REACT === 'true') {
     const owner = String(process.env.TELEGRAM_OWNER_ID || '').trim();
     return Boolean(owner && String(msg?.from?.id) === owner);
   }
+  function canControlTelegram(msg) {
+    const owner = String(process.env.TELEGRAM_OWNER_ID || '').trim();
+    return Boolean(owner && String(msg?.from?.id) === owner);
+  }
+  const telegramImage = path.join(__dirname, 'V3.jpg');
+  const developerUrl = process.env.DEVELOPER_URL || 'https://github.com/moodswing123/KIRA-';
+  const mainKeyboard = {
+    inline_keyboard: [
+      [{ text: '⚙️ Owner Settings', callback_data: 'kira_owner' }, { text: '🛡 Kira Access', callback_data: 'kira_access' }],
+      [{ text: '🔗 Pair WhatsApp', callback_data: 'kira_pair' }, { text: '📡 Status', callback_data: 'kira_status' }],
+      [{ text: '❤️ Thanks To', callback_data: 'kira_thanks' }],
+      [{ text: '💻 Victory Tech', url: developerUrl }]
+    ]
+  };
+  const mainText = (firstName = 'there') =>
+    `<b>╔════════════════════╗</b>\n` +
+    `<b>║      KIRA MD      ║</b>\n` +
+    `<b>╚════════════════════╝</b>\n\n` +
+    `👋 Welcome, <b>${String(firstName).replace(/[<>&]/g, '')}</b>!\n\n` +
+    `🚀 <b>Kira</b> is online and ready.\n` +
+    `🔗 Telegram × WhatsApp control panel\n` +
+    `🧩 Version: <b>2.0.0</b>\n` +
+    `🛠 By <b>Victory Tech</b>\n\n` +
+    `Choose an option below to continue.`;
+  async function sendMainMenu(bot, msg) {
+    const options = { caption: mainText(msg.from?.first_name), parse_mode: 'HTML', reply_markup: mainKeyboard };
+    try { await bot.sendPhoto(msg.chat.id, telegramImage, options); }
+    catch (error) { console.error('Start image failed:', error.message); await bot.sendMessage(msg.chat.id, options.caption, { parse_mode: 'HTML', reply_markup: mainKeyboard }); }
+  }
   function initTelegram() {
     const token = String(process.env.TELEGRAM_BOT_TOKEN || '').trim();
     if (!token) { console.log('Telegram control disabled: TELEGRAM_BOT_TOKEN is not set.'); return; }
     const TelegramBot = require('node-telegram-bot-api');
     const bot = new TelegramBot(token, { polling: true });
-    bot.onText(/^\/start$/, msg => bot.sendMessage(msg.chat.id, 'Kira is online. Use /pair <number> for the fixed WhatsApp pairing code KIRABOTS.'));
-    bot.onText(/^\/status$/, msg => bot.sendMessage(msg.chat.id, activeConnection?.user ? `Kira WhatsApp is connected as ${activeConnection.user.id}.` : 'Kira WhatsApp is not connected.'));
+    bot.on('polling_error', error => console.error('Telegram polling error:', error.message));
+    bot.onText(/^\/start(?:\s+.*)?$/i, msg => sendMainMenu(bot, msg));
+    bot.onText(/^\/status$/i, msg => bot.sendMessage(msg.chat.id, activeConnection?.user ? `✅ <b>Kira WhatsApp is connected</b>\n\n${activeConnection.user.id}` : '⚠️ <b>Kira WhatsApp is not connected.</b>', { parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: '↩️ Back', callback_data: 'kira_back' }]] } }));
     bot.onText(/^\/pair(?:\s+(.+))?$/i, async (msg, match) => {
-      if (!canControlTelegram(msg)) return bot.sendMessage(msg.chat.id, 'Access denied. Configure TELEGRAM_OWNER_ID.');
+      if (!canControlTelegram(msg)) return bot.sendMessage(msg.chat.id, '⛔ Access denied.');
       const number = String(match?.[1] || '').replace(/\D/g, '');
-      if (number.length < 10) return bot.sendMessage(msg.chat.id, 'Usage: /pair <international-number> (digits only).');
-      if (activeConnection?.user) return bot.sendMessage(msg.chat.id, 'WhatsApp is already connected.');
+      if (number.length < 10) return bot.sendMessage(msg.chat.id, 'Usage: <code>/pair 234XXXXXXXXXX</code>', { parse_mode: 'HTML' });
+      if (activeConnection?.user) return bot.sendMessage(msg.chat.id, '✅ WhatsApp is already connected.');
       pairingPhone = number;
-      pairingNotifier = (code, error) => bot.sendMessage(msg.chat.id, error ? `Pairing failed: ${error.message}` : `Your fixed Kira pairing code is: ${code}`);
-      await bot.sendMessage(msg.chat.id, 'Starting WhatsApp pairing…');
-      try { await connectToWA(); } catch (error) { await bot.sendMessage(msg.chat.id, `Pairing failed: ${error.message}`); pairingPhone = ''; pairingNotifier = null; }
+      pairingNotifier = (code, error) => bot.sendMessage(msg.chat.id, error ? `❌ Pairing failed: ${error.message || error}` : `✅ <b>Your Kira pairing code</b>\n\n<code>${code}</code>\n\nOpen WhatsApp → Linked devices → Link with phone number.`, { parse_mode: 'HTML' });
+      await bot.sendMessage(msg.chat.id, '⏳ Starting WhatsApp pairing…');
+      try { await connectToWA(); } catch (error) { await bot.sendMessage(msg.chat.id, `❌ Pairing failed: ${error.message}`); pairingPhone = ''; pairingNotifier = null; }
     });
-    bot.onText(/^\/disconnect$/, async msg => {
-      if (!canControlTelegram(msg)) return bot.sendMessage(msg.chat.id, 'Access denied.');
-      if (!activeConnection) return bot.sendMessage(msg.chat.id, 'WhatsApp is already disconnected.');
-      try { activeConnection.end(undefined); activeConnection = null; await bot.sendMessage(msg.chat.id, 'WhatsApp disconnected.'); } catch (error) { await bot.sendMessage(msg.chat.id, `Disconnect failed: ${error.message}`); }
+    bot.onText(/^\/disconnect$/i, async msg => {
+      if (!canControlTelegram(msg)) return bot.sendMessage(msg.chat.id, '⛔ Access denied.');
+      if (!activeConnection) return bot.sendMessage(msg.chat.id, 'ℹ️ WhatsApp is already disconnected.');
+      try { activeConnection.end(undefined); activeConnection = null; await bot.sendMessage(msg.chat.id, '✅ WhatsApp disconnected.'); } catch (error) { await bot.sendMessage(msg.chat.id, `❌ Disconnect failed: ${error.message}`); }
+    });
+    bot.on('callback_query', async query => {
+      const chatId = query.message?.chat?.id;
+      if (!chatId) return;
+      await bot.answerCallbackQuery(query.id).catch(() => {});
+      const data = query.data;
+      if (data === 'kira_back') return bot.sendMessage(chatId, mainText(query.from?.first_name), { parse_mode: 'HTML', reply_markup: mainKeyboard });
+      if (data === 'kira_status') return bot.sendMessage(chatId, activeConnection?.user ? `✅ <b>Kira WhatsApp is connected</b>\n\n${activeConnection.user.id}` : '⚠️ <b>Kira WhatsApp is not connected.</b>', { parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: '↩️ Back', callback_data: 'kira_back' }]] } });
+      if (data === 'kira_pair') return bot.sendMessage(chatId, '🔗 Send <code>/pair 234XXXXXXXXXX</code> to begin pairing.\n\nFixed code: <code>KIRABOTS</code>', { parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: '↩️ Back', callback_data: 'kira_back' }]] } });
+      if (data === 'kira_access') return bot.sendMessage(chatId, '🛡 <b>Kira Access</b>\n\nUse the buttons below to control the WhatsApp instance.', { parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: '🔗 Pair WhatsApp', callback_data: 'kira_pair' }], [{ text: '📡 Status', callback_data: 'kira_status' }], [{ text: '↩️ Back', callback_data: 'kira_back' }]] } });
+      if (data === 'kira_owner') { if (!canControlTelegram(query)) return bot.sendMessage(chatId, '⛔ Owner only.'); return bot.sendMessage(chatId, '⚙️ <b>Owner Settings</b>\n\n/pair &lt;number&gt; — pair WhatsApp\n/status — connection status\n/disconnect — disconnect WhatsApp', { parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: '↩️ Back', callback_data: 'kira_back' }]] } }); }
+      if (data === 'kira_thanks') return bot.sendMessage(chatId, '❤️ <b>Thanks To</b>\n\nVictory Tech — creator and maintainer of Kira MD.', { parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: '↩️ Back', callback_data: 'kira_back' }]] } });
     });
     console.log('Telegram control initialized for Kira.');
   }

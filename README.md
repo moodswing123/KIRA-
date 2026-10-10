@@ -8,7 +8,7 @@
 - Telegram controls for pairing, status, and disconnect
 - Persistent Baileys authentication in `sessions/`
 - Fixed WhatsApp pairing code: **`KIRABOTS`**
-- Baileys dependency aligned with the reference implementation: **`7.0.0-rc13`**
+- Baileys dependency pinned to stable **`@whiskeysockets/baileys 6.7.23`** for reliable fresh pairing.
 - No QR or random pairing-code flow is used by the Telegram pairing command
 
 ## Configuration

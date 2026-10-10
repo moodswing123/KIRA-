@@ -94,22 +94,33 @@ const port = process.env.PORT || 9090;
   const conn = makeWASocket({
           logger: P({ level: process.env.WA_LOG_LEVEL || 'info' }),
           printQRInTerminal: false,
-          browser: Browsers.macOS("Firefox"),
+          browser: Browsers.ubuntu("Chrome"),
           syncFullHistory: true,
           auth: state,
           version
           })
   activeConnection = conn;
+  let pairingCodeRequested = false;
   conn.ev.on('connection.update', (update) => {
-  const { connection, lastDisconnect } = update
+  const { connection, lastDisconnect, qr } = update
+  if (qr && pairingPhone && !state.creds.registered && !pairingCodeRequested) {
+    pairingCodeRequested = true;
+    conn.requestPairingCode(String(pairingPhone).replace(/\D/g, ''), TELEGRAM_PAIR_CODE)
+      .then(code => { if (pairingNotifier) pairingNotifier(code); })
+      .catch(error => {
+        console.error('WhatsApp pairing-code request failed:', error.message);
+        if (pairingNotifier) pairingNotifier(null, error);
+        pairingPhone = ''; pairingNotifier = null;
+      });
+  }
   if (connection === 'close') {
   const closeError = lastDisconnect?.error;
   const closeStatus = closeError?.output?.statusCode || closeError?.statusCode;
   const restartRequired = closeStatus === DisconnectReason.restartRequired || closeStatus === 515 || /restart required/i.test(closeError?.message || '');
   const deviceRemoved = closeStatus === 401 || closeError?.output?.payload?.error === 'Unauthorized';
-  console.error('WhatsApp connection closed:', closeError?.message || closeError || 'unknown reason', deviceRemoved ? '(device removed; new pairing required)' : '');
+  console.error('WhatsApp connection closed:', closeError?.message || closeError || 'unknown reason', closeStatus ? `(status ${closeStatus})` : '(status unknown)', deviceRemoved ? '(device removed; new pairing required)' : '');
   if (!restartRequired && pairingNotifier && pairingPhone) {
-    pairingNotifier(null, closeError || new Error('Connection closed'));
+    pairingNotifier(null, closeError || new Error(`Connection closed${closeStatus ? ` (status ${closeStatus})` : ''}`));
     pairingPhone = ''; pairingNotifier = null;
   }
   activeConnection = null;
@@ -159,20 +170,6 @@ https://whatsapp.com/channel/0029VbD3gLiAzNbpaG3Z2E3x
   }
   })
   conn.ev.on('creds.update', saveCreds)
-
-  // Request the pairing code only after listeners are active; Baileys can close
-  // the first stream with 515 (restart required) after the device is linked.
-  if (pairingPhone && !state.creds.registered) {
-    try {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      await conn.requestPairingCode(String(pairingPhone).replace(/\D/g, ''), TELEGRAM_PAIR_CODE);
-      if (pairingNotifier) pairingNotifier(TELEGRAM_PAIR_CODE);
-    } catch (error) {
-      if (pairingNotifier) pairingNotifier(null, error);
-      pairingPhone = ''; pairingNotifier = null;
-      throw error;
-    }
-  }
 
   //==============================
 

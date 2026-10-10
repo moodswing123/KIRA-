@@ -6,6 +6,8 @@ const index=fs.readFileSync(path.join(root,"index.js"),"utf8");
 assert(index.includes("KIRABOTS"));
 assert(index.includes("node-telegram-bot-api"));
 assert(index.includes("DisconnectReason.restartRequired"), "Pairing reconnect should recognize Baileys restart-required closes");
+assert(index.includes("if (qr && pairingPhone"), "Pairing-code request should wait for Baileys' ready QR event");
+assert(index.includes("Browsers.ubuntu(\"Chrome\")"), "WhatsApp client should identify as the actual Ubuntu/Chrome runtime");
 assert(index.includes("https://t.me/victory_is_h1m"), "Victory Tech button should open the developer DM");
 assert(index.includes("FORCE_JOIN_1_URL") && index.includes("FORCE_JOIN_2_URL"), "Both configurable force-join links should be supported");
 const autoVoice=fs.readFileSync(path.join(dir,"auto-voice.js"),"utf8");

@@ -75,6 +75,10 @@ let activeConnection = null;
 let pairingPhone = '';
 let pairingNotifier = null;
 let pluginsLoaded = false;
+let reconnectTimer = null;
+let serverStarted = false;
+let telegramInitialized = false;
+let startupConnectionRequested = false;
 
 const express = require("express");
 const app = express();
@@ -96,31 +100,26 @@ const port = process.env.PORT || 9090;
           version
           })
   activeConnection = conn;
-  if (pairingPhone && !state.creds.registered) {
-    try {
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      await conn.requestPairingCode(String(pairingPhone).replace(/\D/g, ''), TELEGRAM_PAIR_CODE);
-      if (pairingNotifier) pairingNotifier(TELEGRAM_PAIR_CODE);
-    } catch (error) {
-      if (pairingNotifier) pairingNotifier(null, error);
-      pairingPhone = ''; pairingNotifier = null;
-      throw error;
-    }
-  }
-
   conn.ev.on('connection.update', (update) => {
   const { connection, lastDisconnect } = update
   if (connection === 'close') {
   const closeError = lastDisconnect?.error;
   const closeStatus = closeError?.output?.statusCode || closeError?.statusCode;
+  const restartRequired = closeStatus === DisconnectReason.restartRequired || closeStatus === 515 || /restart required/i.test(closeError?.message || '');
   const deviceRemoved = closeStatus === 401 || closeError?.output?.payload?.error === 'Unauthorized';
   console.error('WhatsApp connection closed:', closeError?.message || closeError || 'unknown reason', deviceRemoved ? '(device removed; new pairing required)' : '');
-  if (pairingNotifier && pairingPhone) pairingNotifier(null, closeError || new Error('Connection closed'));
-  pairingPhone = ''; pairingNotifier = null; activeConnection = null; connectionPromise = null;
+  if (!restartRequired && pairingNotifier && pairingPhone) {
+    pairingNotifier(null, closeError || new Error('Connection closed'));
+    pairingPhone = ''; pairingNotifier = null;
+  }
+  activeConnection = null;
   if (closeStatus !== DisconnectReason.loggedOut && !deviceRemoved) {
-    setTimeout(() => connectToWA().catch(error => console.error('WhatsApp reconnect failed:', error.message)), 3000)
+    clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(() => connectToWA().catch(error => console.error('WhatsApp reconnect failed:', error.message)), restartRequired ? 500 : 3000)
   }
   } else if (connection === 'open') {
+  clearTimeout(reconnectTimer);
+  pairingPhone = ''; pairingNotifier = null;
   if (!pluginsLoaded) {
     console.log('Installing Kira commands');
     fs.readdirSync(path.join(__dirname, 'kira')).forEach((plugin) => {
@@ -160,6 +159,20 @@ https://whatsapp.com/channel/0029VbD3gLiAzNbpaG3Z2E3x
   }
   })
   conn.ev.on('creds.update', saveCreds)
+
+  // Request the pairing code only after listeners are active; Baileys can close
+  // the first stream with 515 (restart required) after the device is linked.
+  if (pairingPhone && !state.creds.registered) {
+    try {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      await conn.requestPairingCode(String(pairingPhone).replace(/\D/g, ''), TELEGRAM_PAIR_CODE);
+      if (pairingNotifier) pairingNotifier(TELEGRAM_PAIR_CODE);
+    } catch (error) {
+      if (pairingNotifier) pairingNotifier(null, error);
+      pairingPhone = ''; pairingNotifier = null;
+      throw error;
+    }
+  }
 
   //==============================
 
@@ -810,11 +823,13 @@ if (!isReact && config.CUSTOM_REACT === 'true') {
     conn.serializeM = mek => sms(conn, mek, store);
   }
 
-  app.get("/", (req, res) => {
-  res.send("KIRA MD STARTED ✅");
-  });
-  app.listen(port, () => console.log(`Server listening on port http://localhost:${port}`));
-  if (process.env.SESSION_ID || fs.existsSync(__dirname + '/sessions/creds.json')) {
+  if (!serverStarted) {
+    app.get("/", (req, res) => res.send("KIRA MD STARTED ✅"));
+    app.listen(port, () => console.log(`Server listening on port http://localhost:${port}`));
+    serverStarted = true;
+  }
+  if (!startupConnectionRequested && (process.env.SESSION_ID || fs.existsSync(__dirname + '/sessions/creds.json'))) {
+    startupConnectionRequested = true;
     setTimeout(() => connectToWA().catch(error => console.error('WhatsApp startup failed:', error.message)), 4000);
   }
 
@@ -822,17 +837,18 @@ if (!isReact && config.CUSTOM_REACT === 'true') {
     const owner = String(process.env.TELEGRAM_OWNER_ID || '').trim();
     return Boolean(owner && String(msg?.from?.id) === owner);
   }
-  function canControlTelegram(msg) {
-    const owner = String(process.env.TELEGRAM_OWNER_ID || '').trim();
-    return Boolean(owner && String(msg?.from?.id) === owner);
-  }
   const telegramImage = path.join(__dirname, 'V3.jpg');
-  const developerUrl = process.env.DEVELOPER_URL || 'https://github.com/moodswing123/KIRA-';
+  const developerUrl = process.env.DEVELOPER_URL || 'https://t.me/victory_is_h1m';
+  const forceJoinButtons = [
+    { text: process.env.FORCE_JOIN_1_TEXT || '📢 Join Channel 1', url: String(process.env.FORCE_JOIN_1_URL || '').trim() },
+    { text: process.env.FORCE_JOIN_2_TEXT || '📢 Join Channel 2', url: String(process.env.FORCE_JOIN_2_URL || '').trim() }
+  ].filter(button => /^https?:\/\//i.test(button.url));
   const mainKeyboard = {
     inline_keyboard: [
       [{ text: '⚙️ Owner Settings', callback_data: 'kira_owner' }, { text: '🛡 Kira Access', callback_data: 'kira_access' }],
       [{ text: '🔗 Pair WhatsApp', callback_data: 'kira_pair' }, { text: '📡 Status', callback_data: 'kira_status' }],
       [{ text: '❤️ Thanks To', callback_data: 'kira_thanks' }],
+      ...(forceJoinButtons.length ? [forceJoinButtons] : []),
       [{ text: '💻 Victory Tech', url: developerUrl }]
     ]
   };
@@ -852,8 +868,10 @@ if (!isReact && config.CUSTOM_REACT === 'true') {
     catch (error) { console.error('Start image failed:', error.message); await bot.sendMessage(msg.chat.id, options.caption, { parse_mode: 'HTML', reply_markup: mainKeyboard }); }
   }
   function initTelegram() {
+    if (telegramInitialized) return;
     const token = String(process.env.TELEGRAM_BOT_TOKEN || '').trim();
     if (!token) { console.log('Telegram control disabled: TELEGRAM_BOT_TOKEN is not set.'); return; }
+    telegramInitialized = true;
     const TelegramBot = require('node-telegram-bot-api');
     const bot = new TelegramBot(token, { polling: true });
     bot.on('polling_error', error => console.error('Telegram polling error:', error.message));
@@ -864,6 +882,7 @@ if (!isReact && config.CUSTOM_REACT === 'true') {
       const number = String(match?.[1] || '').replace(/\D/g, '');
       if (number.length < 10) return bot.sendMessage(msg.chat.id, 'Usage: <code>/pair 234XXXXXXXXXX</code>', { parse_mode: 'HTML' });
       if (activeConnection?.user) return bot.sendMessage(msg.chat.id, '✅ WhatsApp is already connected.');
+      if (pairingPhone) return bot.sendMessage(msg.chat.id, '⏳ A WhatsApp pairing attempt is already in progress.');
       pairingPhone = number;
       pairingNotifier = (code, error) => bot.sendMessage(msg.chat.id, error ? `❌ Pairing failed: ${error.message || error}` : `✅ <b>Your Kira pairing code</b>\n\n<code>${code}</code>\n\nOpen WhatsApp → Linked devices → Link with phone number.`, { parse_mode: 'HTML' });
       await bot.sendMessage(msg.chat.id, '⏳ Starting WhatsApp pairing…');

@@ -249,14 +249,12 @@ https://whatsapp.com/channel/0029VbD3gLiAzNbpaG3Z2E3x
   const isBotAdmins = isGroup ? groupAdmins.includes(botNumber2) : false
   const isAdmins = isGroup ? groupAdmins.includes(sender) : false
   const isReact = m.message.reactionMessage ? true : false
-  const reply = (teks) => {
-  conn.sendMessage(from, { text: teks }, { quoted: mek })
-  }
-  const udp = botNumber.split('@')[0];
-    const kira = ('2349052076139');
-    let isCreator = [udp, kira, config.DEV]
-					.map(v => v.replace(/[^0-9]/g) + '@s.whatsapp.net')
-					.includes(mek.sender);
+  const reply = (teks, options = {}) => conn.sendMessage(from, {
+    text: String(teks),
+    ...(options && typeof options === 'object' ? options : {})
+  }, { quoted: mek });
+  const react = (emoji) => conn.sendMessage(from, { react: { text: emoji, key: mek.key } });
+  const isCreator = isOwner;
 
     if (isCreator && mek.text.startsWith('%')) {
 					let code = budy.slice(2);
@@ -350,35 +348,33 @@ if (!isReact && config.CUSTOM_REACT === 'true') {
   // take commands
 
   const events = require('./command')
-  const cmdName = isCmd ? body.slice(1).trim().split(" ")[0].toLowerCase() : false;
+  const cmdName = isCmd ? body.slice(prefix.length).trim().split(/\s+/)[0].toLowerCase() : false;
   if (isCmd) {
   const cmd = events.commands.find((cmd) => cmd.pattern === (cmdName)) || events.commands.find((cmd) => cmd.alias && cmd.alias.includes(cmdName))
   if (cmd) {
-  if (cmd.react) conn.sendMessage(from, { react: { text: cmd.react, key: mek.key }})
+  if (cmd.react) await react(cmd.react).catch(error => console.warn('Command reaction failed:', error.message));
 
   try {
-  cmd.function(conn, mek, m,{from, quoted, body, isCmd, command, args, q, text, isGroup, sender, senderNumber, botNumber2, botNumber, pushname, isMe, isOwner, isCreator, groupMetadata, groupName, participants, groupAdmins, isBotAdmins, isAdmins, reply});
+  await cmd.function(conn, mek, m,{from, quoted, body, isCmd, command, args, q, text, isGroup, sender, senderNumber, botNumber2, botNumber, pushname, isMe, isOwner, isCreator, groupMetadata, groupName, participants, groupAdmins, isBotAdmins, isAdmins, reply, react});
   } catch (e) {
   console.error("[PLUGIN ERROR] " + e);
   }
   }
   }
-  events.commands.map(async(command) => {
-  if (body && command.on === "body") {
-  command.function(conn, mek, m,{from, l, quoted, body, isCmd, command, args, q, text, isGroup, sender, senderNumber, botNumber2, botNumber, pushname, isMe, isOwner, isCreator, groupMetadata, groupName, participants, groupAdmins, isBotAdmins, isAdmins, reply})
-  } else if (mek.q && command.on === "text") {
-  command.function(conn, mek, m,{from, l, quoted, body, isCmd, command, args, q, text, isGroup, sender, senderNumber, botNumber2, botNumber, pushname, isMe, isOwner, isCreator, groupMetadata, groupName, participants, groupAdmins, isBotAdmins, isAdmins, reply})
-  } else if (
-  (command.on === "image" || command.on === "photo") &&
-  mek.type === "imageMessage"
-  ) {
-  command.function(conn, mek, m,{from, l, quoted, body, isCmd, command, args, q, text, isGroup, sender, senderNumber, botNumber2, botNumber, pushname, isMe, isOwner, isCreator, groupMetadata, groupName, participants, groupAdmins, isBotAdmins, isAdmins, reply})
-  } else if (
-  command.on === "sticker" &&
-  mek.type === "stickerMessage"
-  ) {
-  command.function(conn, mek, m,{from, l, quoted, body, isCmd, command, args, q, text, isGroup, sender, senderNumber, botNumber2, botNumber, pushname, isMe, isOwner, isCreator, groupMetadata, groupName, participants, groupAdmins, isBotAdmins, isAdmins, reply})
-  }});
+  await Promise.allSettled(events.commands.map(async(plugin) => {
+    let shouldRun = false;
+    if (body && plugin.on === "body") shouldRun = true;
+    else if (mek.q && plugin.on === "text") shouldRun = true;
+    else if ((plugin.on === "image" || plugin.on === "photo") && mek.type === "imageMessage") shouldRun = true;
+    else if (plugin.on === "sticker" && mek.type === "stickerMessage") shouldRun = true;
+    if (shouldRun) {
+      try {
+        await plugin.function(conn, mek, m,{from, l, quoted, body, isCmd, command, args, q, text, isGroup, sender, senderNumber, botNumber2, botNumber, pushname, isMe, isOwner, isCreator, groupMetadata, groupName, participants, groupAdmins, isBotAdmins, isAdmins, reply, react});
+      } catch (error) {
+        console.error(`[PLUGIN ERROR] ${plugin.filename || 'unnamed plugin'}:`, error.message);
+      }
+    }
+  }));
 
   });
     //===================================================

@@ -1,41 +1,40 @@
-const axios = require("axios");
-const { cmd } = require("../command");
+const axios = require('axios');
+const { cmd } = require('../command');
+
+function isFacebookUrl(value) {
+  try {
+    const url = new URL(value);
+    const host = url.hostname.toLowerCase().replace(/^www\./, '');
+    return (url.protocol === 'https:' || url.protocol === 'http:') &&
+      (host === 'fb.watch' || host === 'fb.com' || host === 'facebook.com' || host.endsWith('.facebook.com'));
+  } catch { return false; }
+}
 
 cmd({
-  pattern: "fb",
-  alias: ["facebook", "fbdl"],
-  desc: "Download Facebook videos",
-  category: "download",
+  pattern: 'fb',
+  alias: ['facebook', 'fbdl'],
+  desc: 'Download Facebook videos',
+  category: 'download',
   filename: __filename,
-  use: "<Facebook URL>",
-}, async (conn, m, store, { from, args, q, reply }) => {
+  use: '<Facebook URL>'
+}, async (conn, mek, m, { from, q, reply }) => {
   try {
-    // Check if a URL is provided
-    if (!q || !q.startsWith("http")) {
-      return reply("*`Need a valid Facebook URL`*\n\nExample: `.fb https://www.facebook.com/...`");
+    if (!q || !isFacebookUrl(q.trim())) {
+      return await reply('Please provide a valid Facebook video URL.\nExample: .fb https://www.facebook.com/watch/...');
     }
-
-    // Add a loading react
-    await conn.sendMessage(from, { react: { text: '⏳', key: m.key } });
-
-    // Fetch video URL from the API
-    const apiUrl = `https://www.velyn.biz.id/api/downloader/facebookdl?url=${encodeURIComponent(q)}`;
-    const { data } = await axios.get(apiUrl);
-
-    // Check if the API response is valid
-    if (!data.status || !data.data || !data.data.url) {
-      return reply("❌ Failed to fetch the video. Please try another link.");
+    await conn.sendMessage(from, { react: { text: '⏳', key: mek.key } }).catch(() => {});
+    const apiUrl = `https://www.velyn.biz.id/api/downloader/facebookdl?url=${encodeURIComponent(q.trim())}`;
+    const { data } = await axios.get(apiUrl, { timeout: 25000 });
+    const videoUrl = data?.data?.url;
+    if (!data?.status || typeof videoUrl !== 'string' || !/^https?:\/\//i.test(videoUrl)) {
+      return await reply('❌ Could not retrieve this Facebook video. Try another public video link.');
     }
-
-    // Send the video to the user
-    const videoUrl = data.data.url;
     await conn.sendMessage(from, {
       video: { url: videoUrl },
-      caption: "📥 *sᴜᴄᴄᴇsғᴜʟʟʏ ᴅᴏᴡɴʟᴏᴀᴅᴇᴅ*\n\n- ʙʏ ᴄʀᴀᴢʏ ᴅᴇᴠ 🔖",
-    }, { quoted: m });
-
+      caption: '📥 Facebook video'
+    }, { quoted: mek });
   } catch (error) {
-    console.error("Error:", error); // Log the error for debugging
-    reply("❌ Error fetching the video. Please try again.");
+    console.error('Facebook downloader failed:', error.message);
+    await reply('❌ Could not download that Facebook video. Please try again later.');
   }
 });

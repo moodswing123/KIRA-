@@ -7,7 +7,7 @@
     "start": "node index.js",
     "dev": "node --watch index.js",
     "check": "node --check index.js && node --check command.js && node --check config.js",
-    "test": "npm run check && node scripts/smoke-test.js"
+    "test": "npm run check && node scripts/smoke-test.js && node scripts/command-handler-test.js"
   },
   "engines": {
     "node": ">=20"

@@ -1,47 +1,32 @@
-const { cmd, commands } = require('../command');
+const { cmd } = require('../command');
 const axios = require('axios');
 
 cmd({
-  'pattern': "couplepp",
-  'alias': ["couple", "cpp"],
-  'react': '💑',
-  'desc': "Get a male and female couple profile picture.",
-  'category': "image",
-  'use': ".couplepp",
-  'filename': __filename
-}, async (conn, m, store, {
-  from,
-  args,
-  reply
-}) => {
+  pattern: 'couplepp',
+  alias: ['couple', 'cpp'],
+  react: '💑',
+  desc: 'Get a male and female couple profile picture',
+  category: 'image',
+  use: '.couplepp',
+  filename: __filename
+}, async (conn, mek, m, { from, reply }) => {
   try {
-    reply("*💑 ᴄʀᴀᴢʏ ᴠ3 ғᴇᴇᴛᴄʜɪɴɢ ʏᴏᴜʀ ᴄᴏᴜᴘʟᴇᴘᴘ...*");
-
-    const response = await axios.get("https://api.davidcyriltech.my.id/couplepp");
-
-    if (!response.data || !response.data.success) {
-      return reply("❌ Failed to fetch couple profile pictures. Please try again later.");
+    await reply('💑 Fetching couple profile pictures…');
+    const { data } = await axios.get('https://api.davidcyriltech.my.id/couplepp', { timeout: 20000 });
+    const male = data?.male;
+    const female = data?.female;
+    const urls = [male, female].filter(value => typeof value === 'string' && /^https?:\/\//i.test(value));
+    if (!data?.success || urls.length === 0) {
+      return await reply('❌ Couple pictures are unavailable right now. Please try again later.');
     }
-
-    const malePp = response.data.male;
-    const femalePp = response.data.female;
-
-    if (malePp) {
-      await conn.sendMessage(from, {
-        'image': { 'url': malePp },
-        'caption': "👨 ᴍᴀʟ ᴄᴏᴜᴘʟᴇ ᴘɪᴄs\n> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴄʀᴀᴢʏ ᴛᴇᴄʜ"
-      }, { 'quoted': m });
+    if (male && /^https?:\/\//i.test(male)) {
+      await conn.sendMessage(from, { image: { url: male }, caption: '👨 Couple profile picture' }, { quoted: mek });
     }
-
-    if (femalePp) {
-      await conn.sendMessage(from, {
-        'image': { 'url': femalePp },
-        'caption': "👩 ғᴇᴍᴀʟᴇ ᴄᴏᴜᴘʟᴇ ᴘɪᴄs\n> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴄʀᴀᴢʏ ᴛᴇᴄʜ"
-      }, { 'quoted': m });
+    if (female && /^https?:\/\//i.test(female)) {
+      await conn.sendMessage(from, { image: { url: female }, caption: '👩 Couple profile picture' }, { quoted: mek });
     }
-
   } catch (error) {
-    console.error(error);
-    reply("❌ An error occurred while fetching the couple profile pictures.");
+    console.error('Couple profile command failed:', error.message);
+    await reply('❌ Could not fetch couple profile pictures. Please try again later.');
   }
 });

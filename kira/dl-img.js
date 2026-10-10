@@ -1,52 +1,32 @@
-const { cmd } = require("../command");
-const axios = require("axios");
+const { cmd } = require('../command');
+const axios = require('axios');
 
 cmd({
-    pattern: "img",
-    alias: ["image", "googleimage", "searchimg"],
-    react: "🎢",
-    desc: "Search and download Google images",
-    category: "fun",
-    use: ".img <keywords>",
-    filename: __filename
+  pattern: 'img',
+  alias: ['image', 'googleimage', 'searchimg'],
+  react: '🎢',
+  desc: 'Search and download images',
+  category: 'fun',
+  use: '.img <keywords>',
+  filename: __filename
 }, async (conn, mek, m, { reply, args, from }) => {
-    try {
-        const query = args.join(" ");
-        if (!query) {
-            return reply("🖼️ Please provide a search query\nExample: .img cute cats");
-        }
-
-        await reply(`🔍 sᴇᴀʀᴄʜ ʏᴏᴜ ɪᴍᴀɢᴇ ғʀᴏᴍ "${query}"...`);
-
-        const url = `https://apis.davidcyriltech.my.id/googleimage?query=${encodeURIComponent(query)}`;
-        const response = await axios.get(url);
-
-        // Validate response
-        if (!response.data?.success || !response.data.results?.length) {
-            return reply("❌ No images found. Try different keywords");
-        }
-
-        const results = response.data.results;
-        // Get 5 random images
-        const selectedImages = results
-            .sort(() => 0.5 - Math.random())
-            .slice(0, 5);
-
-        for (const imageUrl of selectedImages) {
-            await conn.sendMessage(
-                from,
-                {
-                    image: { url: imageUrl },
-                    caption: `📷 ʜᴇʀᴇ ɪs ʏᴏᴜʀ ɪᴍᴀɢᴇ ǫᴜᴇʀʏ: ${query}\n> © ᴘᴏᴡᴇʀᴇᴅ ʙʏ ᴄʀᴀᴢʏ ᴛᴇᴄʜ`
-                },
-                { quoted: mek }
-            );
-            // Add delay between sends to avoid rate limiting
-            await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-
-    } catch (error) {
-        console.error('Image Search Error:', error);
-        reply(`❌ Error: ${error.message || "Failed to fetch images"}`);
+  try {
+    const query = args.join(' ').trim();
+    if (!query) return await reply('🖼️ Provide a search query.\nExample: .img cute cats');
+    await reply(`🔍 Searching images for “${query}”…`);
+    const { data } = await axios.get(`https://apis.davidcyriltech.my.id/googleimage?query=${encodeURIComponent(query)}`, { timeout: 20000 });
+    const results = Array.isArray(data?.results)
+      ? data.results.filter(value => typeof value === 'string' && /^https?:\/\//i.test(value))
+      : [];
+    if (!data?.success || results.length === 0) return await reply('❌ No images found. Try different keywords.');
+    for (const imageUrl of results.slice(0, 5)) {
+      await conn.sendMessage(from, {
+        image: { url: imageUrl },
+        caption: `📷 Image results for: ${query}`
+      }, { quoted: mek });
     }
+  } catch (error) {
+    console.error('Image search failed:', error.message);
+    await reply('❌ Image search failed. Please try again later.');
+  }
 });

@@ -1,48 +1,33 @@
 const { cmd } = require('../command');
-const os = require("os");
+const os = require('os');
 const { runtime } = require('../lib/functions');
 const config = require('../config');
 
 cmd({
-    pattern: "alive",
-    alias: ["status", "live", "a"],
-    desc: "Check bot is alive or not",
-    category: "main",
-    react: "🎉",
-    filename: __filename
-},
-async (conn, mek, m, { from, sender, reply }) => {
+  pattern: 'alive',
+  alias: ['status', 'live', 'a'],
+  desc: 'Check whether the bot is online',
+  category: 'main',
+  react: '🎉',
+  filename: __filename
+}, async (conn, mek, m, { from, reply }) => {
+  const status = [
+    `🤖 *${config.BOT_NAME || 'Kira'} is active and online*`,
+    `Owner: ${config.OWNER_NAME || 'Bot owner'}`,
+    `Version: ${require('../package.json').version}`,
+    `Prefix: ${config.PREFIX || '.'}`,
+    `Mode: ${config.MODE || 'public'}`,
+    `Memory: ${(process.memoryUsage().heapUsed / 1024 / 1024).toFixed(1)} MB / ${(os.totalmem() / 1024 / 1024).toFixed(1)} MB`,
+    `Uptime: ${runtime(process.uptime())}`,
+    config.DESCRIPTION || ''
+  ].filter(Boolean).join('\n');
+
+  if (config.MENU_IMAGE_URL) {
     try {
-        const status = `
-╭〔 *🤖 Victory Tech ALIVE* 〕─◉
-│✨ *Bot is Active & Online!*
-│
-│🧠 *Owner:* ${config.OWNER_NAME}
-│⚡ *Version:* 3.0.0
-│📝 *Prefix:* [${config.PREFIX}]
-│📳 *Mode:* [${config.MODE}]
-│💾 *RAM:* ${(process.memoryUsage().heapUsed / 1024 / 1024).toFixed(2)}MB / ${(os.totalmem() / 1024 / 1024).toFixed(2)}MB
-│⌛ *Uptime:* ${runtime(process.uptime())}
-╰─────────────────◉
-> ${config.DESCRIPTION}`;
-
-        await conn.sendMessage(from, {
-            image: { url: config.MENU_IMAGE_URL },
-            caption: status,
-            contextInfo: {
-                mentionedJid: [m.sender],
-                forwardingScore: 1000,
-                isForwarded: true,
-                forwardedNewsletterMessageInfo: {
-                    newsletterJid: '120363400129137847@newsletter',
-                    newsletterName: 'Victory Tech',
-                    serverMessageId: 143
-                }
-            }
-        }, { quoted: mek });
-
-    } catch (e) {
-        console.error("Alive Error:", e);
-        reply(`An error occurred: ${e.message}`);
+      return await conn.sendMessage(from, { image: { url: config.MENU_IMAGE_URL }, caption: status }, { quoted: mek });
+    } catch (error) {
+      console.warn('Alive menu image unavailable; sending text status:', error.message);
     }
+  }
+  return await reply(status);
 });

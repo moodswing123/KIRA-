@@ -31,6 +31,7 @@
 
 - `.ping` — check whether the bot is responding
 - `.menu` — list registered commands (`.help` and `.commands` are aliases)
+- `.uptime` — show how long the bot has been running (`.runtime` and `.up` are aliases)
 
 Telegram pairing is restricted to the numeric user ID configured in `TELEGRAM_OWNER_ID`.
 

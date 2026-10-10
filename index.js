@@ -1,4 +1,6 @@
 require('dotenv').config();
+process.on('unhandledRejection', error => console.error('Unhandled async error:', error?.message || error));
+process.on('uncaughtException', error => console.error('Unhandled runtime error:', error?.message || error));
 const {
   default: makeWASocket,
     useMultiFileAuthState,
@@ -111,11 +113,12 @@ const port = process.env.PORT || 9090;
   if (connection === 'close') {
   const closeError = lastDisconnect?.error;
   const closeStatus = closeError?.output?.statusCode || closeError?.statusCode;
-  console.error('WhatsApp connection closed:', closeError?.message || closeError || 'unknown reason');
+  const deviceRemoved = closeStatus === 401 || closeError?.output?.payload?.error === 'Unauthorized';
+  console.error('WhatsApp connection closed:', closeError?.message || closeError || 'unknown reason', deviceRemoved ? '(device removed; new pairing required)' : '');
   if (pairingNotifier && pairingPhone) pairingNotifier(null, closeError || new Error('Connection closed'));
-  pairingPhone = ''; pairingNotifier = null; activeConnection = null;
-  if (closeStatus !== DisconnectReason.loggedOut) {
-  setTimeout(() => connectToWA().catch(error => console.error('WhatsApp reconnect failed:', error.message)), 3000)
+  pairingPhone = ''; pairingNotifier = null; activeConnection = null; connectionPromise = null;
+  if (closeStatus !== DisconnectReason.loggedOut && !deviceRemoved) {
+    setTimeout(() => connectToWA().catch(error => console.error('WhatsApp reconnect failed:', error.message)), 3000)
   }
   } else if (connection === 'open') {
   if (!pluginsLoaded) {

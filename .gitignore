@@ -3,6 +3,7 @@ node_modules/
 config.env
 sessions/*
 !sessions/.gitkeep
+database.db
 *.log
 cache-temp/
 .tmp/

@@ -1,6 +1,8 @@
 const fs=require("fs"),path=require("path"),assert=require("assert");
 const root=path.join(__dirname,".."),dir=path.join(root,"kira"),files=fs.readdirSync(dir).filter(f=>f.endsWith(".js"));
 assert(files.length,"No Kira modules found"); const command=require(path.join(root,"command.js")); for(const file of files) require(path.join(dir,file)); assert(command.commands.length,"No commands registered");
+assert(command.commands.some(item => item.pattern === 'ping'), "The .ping command should be registered");
+assert(command.commands.some(item => item.pattern === 'menu'), "The .menu command should be registered");
 const legacy=/(darkmods|angel|crazy|neon|neon bug)/i; for(const file of ["index.js","config.js","command.js"].map(f=>path.join(root,f)).concat(files.map(f=>path.join(dir,f)))) assert(!legacy.test(fs.readFileSync(file,"utf8")),`Legacy branding remains in ${path.relative(root,file)}`);
 const index=fs.readFileSync(path.join(root,"index.js"),"utf8");
 assert(index.includes("KIRABOTS"));
@@ -13,4 +15,6 @@ assert(index.includes("FORCE_JOIN_1_URL") && index.includes("FORCE_JOIN_2_URL"),
 const autoVoice=fs.readFileSync(path.join(dir,"auto-voice.js"),"utf8");
 assert(autoVoice.includes("config.AUTO_VOICE !== 'true'"), "Auto-voice must not fetch data while disabled");
 assert(!autoVoice.includes("Error fetching voice:"), "Auto-voice upstream failures must not spam chats");
+const autoSticker=fs.readFileSync(path.join(dir,"auto-sticker.js"),"utf8");
+assert(autoSticker.includes("config.AUTO_STICKER !== 'true'"), "Auto-sticker must not fetch data while disabled");
 console.log(`Smoke test passed: ${command.commands.length} commands from ${files.length} modules.`);

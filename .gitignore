@@ -4,6 +4,7 @@ config.env
 sessions/*
 !sessions/.gitkeep
 database.db
+store/
 *.log
 cache-temp/
 .tmp/

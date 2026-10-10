@@ -27,6 +27,11 @@
 - `/status` — show WhatsApp connection status
 - `/disconnect` — disconnect the active WhatsApp session
 
+### WhatsApp commands
+
+- `.ping` — check whether the bot is responding
+- `.menu` — list registered commands (`.help` and `.commands` are aliases)
+
 Telegram pairing is restricted to the numeric user ID configured in `TELEGRAM_OWNER_ID`.
 
 ## Validation

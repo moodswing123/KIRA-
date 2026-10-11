@@ -38,6 +38,7 @@ const {
   const util = require('util')
   const { sms, downloadMediaMessage, AntiDelete } = require('./lib')
   const { getMessageForRetry } = require('./lib/wa-message-retry');
+  const { processMessageUpsertBatch } = require('./lib/wa-upsert-batch');
   const FileType = require('file-type');
   const axios = require('axios')
   const { File } = require('megajs')
@@ -219,8 +220,8 @@ https://whatsapp.com/channel/0029VbD3gLiAzNbpaG3Z2E3x
 
   //=============readstatus=======
 
-  conn.ev.on('messages.upsert', async(mek) => {
-    mek = mek.messages[0]
+  conn.ev.on('messages.upsert', async(update) => {
+    await processMessageUpsertBatch(update, async (mek) => {
     if (!mek.message) return
     mek.message = (getContentType(mek.message) === 'ephemeralMessage')
     ? mek.message.ephemeralMessage.message
@@ -408,6 +409,7 @@ if (!isReact && config.CUSTOM_REACT === 'true') {
     }
   }));
 
+    }, (error) => console.error('WhatsApp message handler failed:', error.message));
   });
     //===================================================
     conn.decodeJid = jid => {

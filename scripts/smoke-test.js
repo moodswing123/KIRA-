@@ -16,6 +16,7 @@ assert(index.includes("reply, react"), "The dispatcher should provide a reaction
 assert(index.includes("const isCreator = isOwner"), "Creator-only commands should use the configured owner check");
 assert(index.includes("getMessage: key => getMessageForRetry(key, loadMessage)"), "Baileys should retrieve original messages for encryption retries");
 assert(index.includes("if (activeConnection || connectionStartInProgress)"), "Only one WhatsApp socket should be started at a time");
+assert(index.includes("processMessageUpsertBatch(update"), "WhatsApp dispatch should process every message in an upsert batch");
 assert(index.includes("whatsappAuthExpired = true"), "A server-rejected WhatsApp session should be recorded");
 assert(index.includes("await fs.promises.rm(sessionDirectory"), "A revoked session should only be cleared during an owner-requested re-pair");
 const messageStore = fs.readFileSync(path.join(root,"data","store.js"),"utf8");

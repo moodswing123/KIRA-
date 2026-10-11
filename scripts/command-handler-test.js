@@ -4,6 +4,7 @@ const path = require('path');
 const axios = require('axios');
 const { BufferJSON } = require('baileys');
 const { getMessageForRetry } = require('../lib/wa-message-retry');
+const { processMessageUpsertBatch } = require('../lib/wa-upsert-batch');
 const { commands } = require('../command');
 
 for (const file of fs.readdirSync(path.join(__dirname, '../kira')).filter(name => name.endsWith('.js'))) {
@@ -79,6 +80,13 @@ async function main() {
     assert(Buffer.isBuffer(retrieved?.imageMessage?.mediaKey), 'retry lookup did not restore binary message fields');
     assert.deepStrictEqual([...retrieved.imageMessage.mediaKey], [1, 2, 3], 'retry lookup returned different binary content');
     assert.strictEqual(await getMessageForRetry({ id: 'missing', remoteJid: 'retry-chat' }, async () => null), undefined, 'missing retry messages should return undefined');
+    const processedBatch = [];
+    await processMessageUpsertBatch({ messages: [
+      { message: { senderKeyDistributionMessage: {} } },
+      { message: { conversation: '.ping' } },
+      { message: null }
+    ] }, async item => { processedBatch.push(Object.keys(item.message)[0]); });
+    assert.deepStrictEqual(processedBatch, ['senderKeyDistributionMessage', 'conversation'], 'all valid messages in an upsert batch should be processed');
     console.log(`Command handler mock test passed: ${expected.length} WhatsApp commands invoked.`);
   } finally {
     axios.get = originalAxiosGet;

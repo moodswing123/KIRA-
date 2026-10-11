@@ -80,6 +80,10 @@ let reconnectTimer = null;
 let serverStarted = false;
 let telegramInitialized = false;
 let startupConnectionRequested = false;
+let connectionStartInProgress = false;
+const sessionDirectory = path.join(__dirname, 'sessions');
+const reauthRequiredMarker = path.join(sessionDirectory, '.reauth-required');
+let whatsappAuthExpired = fs.existsSync(reauthRequiredMarker);
 
 const express = require("express");
 const app = express();
@@ -88,11 +92,21 @@ const port = process.env.PORT || 9090;
   //=============================================
 
   async function connectToWA() {
+  if (activeConnection || connectionStartInProgress) return activeConnection;
+  connectionStartInProgress = true;
   console.log("Connecting to WhatsApp pls wait...");
-  const { state, saveCreds } = await useMultiFileAuthState(__dirname + '/sessions/')
-  var { version } = await fetchLatestBaileysVersion()
+  let state, saveCreds, version;
+  try {
+    ({ state, saveCreds } = await useMultiFileAuthState(sessionDirectory));
+    ({ version } = await fetchLatestBaileysVersion());
+  } catch (error) {
+    connectionStartInProgress = false;
+    throw error;
+  }
 
-  const conn = makeWASocket({
+  let conn;
+  try {
+    conn = makeWASocket({
           logger: P({ level: process.env.WA_LOG_LEVEL || 'info' }),
           printQRInTerminal: false,
           browser: Browsers.ubuntu("Chrome"),
@@ -101,7 +115,12 @@ const port = process.env.PORT || 9090;
           version,
           getMessage: key => getMessageForRetry(key, loadMessage)
           })
+  } catch (error) {
+    connectionStartInProgress = false;
+    throw error;
+  }
   activeConnection = conn;
+  connectionStartInProgress = false;
   let pairingCodeRequested = false;
   conn.ev.on('connection.update', (update) => {
   const { connection, lastDisconnect, qr } = update
@@ -120,6 +139,15 @@ const port = process.env.PORT || 9090;
   const closeStatus = closeError?.output?.statusCode || closeError?.statusCode;
   const restartRequired = closeStatus === DisconnectReason.restartRequired || closeStatus === 515 || /restart required/i.test(closeError?.message || '');
   const deviceRemoved = closeStatus === 401 || closeError?.output?.payload?.error === 'Unauthorized';
+  if (deviceRemoved) {
+    whatsappAuthExpired = true;
+    try {
+      fs.mkdirSync(sessionDirectory, { recursive: true });
+      fs.writeFileSync(reauthRequiredMarker, new Date().toISOString(), 'utf8');
+    } catch (error) {
+      console.error('Could not persist the WhatsApp re-pair marker:', error.message);
+    }
+  }
   console.error('WhatsApp connection closed:', closeError?.message || closeError || 'unknown reason', closeStatus ? `(status ${closeStatus})` : '(status unknown)', deviceRemoved ? '(device removed; new pairing required)' : '');
   if (!restartRequired && pairingNotifier && pairingPhone) {
     pairingNotifier(null, closeError || new Error(`Connection closed${closeStatus ? ` (status ${closeStatus})` : ''}`));
@@ -132,6 +160,8 @@ const port = process.env.PORT || 9090;
   }
   } else if (connection === 'open') {
   clearTimeout(reconnectTimer);
+  whatsappAuthExpired = false;
+  try { fs.rmSync(reauthRequiredMarker, { force: true }); } catch {}
   pairingPhone = ''; pairingNotifier = null;
   if (!pluginsLoaded) {
     console.log('Installing Kira commands');
@@ -878,6 +908,19 @@ if (!isReact && config.CUSTOM_REACT === 'true') {
       if (number.length < 10) return bot.sendMessage(msg.chat.id, 'Usage: <code>/pair 234XXXXXXXXXX</code>', { parse_mode: 'HTML' });
       if (activeConnection?.user) return bot.sendMessage(msg.chat.id, '✅ WhatsApp is already connected.');
       if (pairingPhone) return bot.sendMessage(msg.chat.id, '⏳ A WhatsApp pairing attempt is already in progress.');
+      if (activeConnection || connectionStartInProgress) return bot.sendMessage(msg.chat.id, '⏳ A WhatsApp connection attempt is still starting. Wait a few seconds, check /status, then retry /pair only if it remains disconnected.');
+      if (whatsappAuthExpired) {
+        try {
+          await fs.promises.rm(sessionDirectory, { recursive: true, force: true });
+          await fs.promises.mkdir(sessionDirectory, { recursive: true });
+          clearTimeout(reconnectTimer);
+          whatsappAuthExpired = false;
+          console.log('Removed WhatsApp auth state rejected by the server; owner requested a fresh pair.');
+        } catch (error) {
+          console.error('Could not reset the expired WhatsApp auth state:', error.message);
+          return bot.sendMessage(msg.chat.id, '❌ Could not reset the expired WhatsApp session. Please contact the bot operator.');
+        }
+      }
       pairingPhone = number;
       pairingNotifier = (code, error) => bot.sendMessage(msg.chat.id, error ? `❌ Pairing failed: ${error.message || error}` : `✅ <b>Your Kira pairing code</b>\n\n<code>${code}</code>\n\nOpen WhatsApp → Linked devices → Link with phone number.`, { parse_mode: 'HTML' });
       await bot.sendMessage(msg.chat.id, '⏳ Starting WhatsApp pairing…');

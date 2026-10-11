@@ -52,6 +52,7 @@ The test command checks JavaScript syntax, loads every Kira module, confirms com
 - This bot uses an always-on Node.js process; it is not a serverless function.
 - The HTTP health endpoint responds at `/` on `PORT` (default `9090`).
 - Baileys' `restart required` close after pairing is treated as a reconnect, not a failed pairing.
+- A WhatsApp `401`/device-removed close marks the local linked-device state as expired; the next owner `/pair` clears that rejected state and requests a fresh pairing code.
 - Auto-voice is inactive unless `AUTO_VOICE=true`; when enabled, it caches its map and logs upstream errors instead of sending an error to chats. Override the map with `AUTO_VOICE_MAP_URL` if needed.
 
 ## License

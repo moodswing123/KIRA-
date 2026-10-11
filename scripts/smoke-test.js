@@ -15,6 +15,9 @@ assert(index.includes("await cmd.function(conn"), "Async command handlers should
 assert(index.includes("reply, react"), "The dispatcher should provide a reaction helper to command handlers");
 assert(index.includes("const isCreator = isOwner"), "Creator-only commands should use the configured owner check");
 assert(index.includes("getMessage: key => getMessageForRetry(key, loadMessage)"), "Baileys should retrieve original messages for encryption retries");
+assert(index.includes("if (activeConnection || connectionStartInProgress)"), "Only one WhatsApp socket should be started at a time");
+assert(index.includes("whatsappAuthExpired = true"), "A server-rejected WhatsApp session should be recorded");
+assert(index.includes("await fs.promises.rm(sessionDirectory"), "A revoked session should only be cleared during an owner-requested re-pair");
 const messageStore = fs.readFileSync(path.join(root,"data","store.js"),"utf8");
 assert(messageStore.includes("BufferJSON.reviver") && messageStore.includes("BufferJSON.replacer"), "Persisted messages should preserve binary encryption/media fields");
 assert(index.includes("https://t.me/victory_is_h1m"), "Victory Tech button should open the developer DM");

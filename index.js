@@ -37,6 +37,7 @@ const {
   const StickersTypes = require('wa-sticker-formatter')
   const util = require('util')
   const { sms, downloadMediaMessage, AntiDelete } = require('./lib')
+  const { getMessageForRetry } = require('./lib/wa-message-retry');
   const FileType = require('file-type');
   const axios = require('axios')
   const { File } = require('megajs')
@@ -97,7 +98,8 @@ const port = process.env.PORT || 9090;
           browser: Browsers.ubuntu("Chrome"),
           syncFullHistory: true,
           auth: state,
-          version
+          version,
+          getMessage: key => getMessageForRetry(key, loadMessage)
           })
   activeConnection = conn;
   let pairingCodeRequested = false;

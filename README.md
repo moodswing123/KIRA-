@@ -7,6 +7,7 @@
 - WhatsApp command modules with configurable prefix and group features
 - Telegram controls for pairing, status, and disconnect
 - Persistent Baileys authentication in `sessions/`
+- Baileys message-retry recovery through the persistent message store, for recipients who initially cannot decrypt a delivery
 - Fixed WhatsApp pairing code: **`KIRABOTS`**
 - Baileys dependency pinned to stable **`@whiskeysockets/baileys 6.7.23`** for reliable fresh pairing.
 - No QR or random pairing-code flow is used by the Telegram pairing command
@@ -45,7 +46,7 @@ The test command checks JavaScript syntax, loads every Kira module, confirms com
 
 ## Deployment notes
 
-- Keep `sessions/` on persistent storage in production.
+- Keep both `sessions/` and `store/` on persistent storage in production. The latter supplies original message payloads when WhatsApp requests a retry.
 - Never commit `.env`, credentials, or generated session files.
 - Configure credentials as host-managed secrets/environment variables; do not commit the Telegram bot token or owner ID.
 - This bot uses an always-on Node.js process; it is not a serverless function.

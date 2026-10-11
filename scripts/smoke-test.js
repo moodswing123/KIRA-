@@ -14,6 +14,9 @@ assert(index.includes("body.slice(prefix.length)"), "Command parsing should hono
 assert(index.includes("await cmd.function(conn"), "Async command handlers should be awaited by the dispatcher");
 assert(index.includes("reply, react"), "The dispatcher should provide a reaction helper to command handlers");
 assert(index.includes("const isCreator = isOwner"), "Creator-only commands should use the configured owner check");
+assert(index.includes("getMessage: key => getMessageForRetry(key, loadMessage)"), "Baileys should retrieve original messages for encryption retries");
+const messageStore = fs.readFileSync(path.join(root,"data","store.js"),"utf8");
+assert(messageStore.includes("BufferJSON.reviver") && messageStore.includes("BufferJSON.replacer"), "Persisted messages should preserve binary encryption/media fields");
 assert(index.includes("https://t.me/victory_is_h1m"), "Victory Tech button should open the developer DM");
 assert(index.includes("FORCE_JOIN_1_URL") && index.includes("FORCE_JOIN_2_URL"), "Both configurable force-join links should be supported");
 const autoVoice=fs.readFileSync(path.join(dir,"auto-voice.js"),"utf8");

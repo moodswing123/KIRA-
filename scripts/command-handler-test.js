@@ -2,6 +2,8 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
+const { BufferJSON } = require('baileys');
+const { getMessageForRetry } = require('../lib/wa-message-retry');
 const { commands } = require('../command');
 
 for (const file of fs.readdirSync(path.join(__dirname, '../kira')).filter(name => name.endsWith('.js'))) {
@@ -69,6 +71,14 @@ async function main() {
     assert(blockActions.some(([jid, action]) => jid === '15557654321@s.whatsapp.net' && action === 'unblock'), '.unblock did not reach updateBlockStatus');
     assert(sent.some(([, payload]) => payload?.text?.includes('Pong!')), '.ping did not return a pong response');
     assert(sent.some(([, payload]) => payload?.text?.includes('COMMANDS')), '.menu did not return the command list');
+    const originalMessage = { imageMessage: { mediaKey: Buffer.from([1, 2, 3]) } };
+    const persisted = JSON.parse(JSON.stringify({
+      id: 'retry-id', jid: 'retry-chat', message: { key: { id: 'retry-id', remoteJid: 'retry-chat' }, message: originalMessage }
+    }, BufferJSON.replacer), BufferJSON.reviver);
+    const retrieved = await getMessageForRetry({ id: 'retry-id', remoteJid: 'retry-chat' }, async (id, jid) => id === persisted.id && jid === persisted.jid ? persisted : null);
+    assert(Buffer.isBuffer(retrieved?.imageMessage?.mediaKey), 'retry lookup did not restore binary message fields');
+    assert.deepStrictEqual([...retrieved.imageMessage.mediaKey], [1, 2, 3], 'retry lookup returned different binary content');
+    assert.strictEqual(await getMessageForRetry({ id: 'missing', remoteJid: 'retry-chat' }, async () => null), undefined, 'missing retry messages should return undefined');
     console.log(`Command handler mock test passed: ${expected.length} WhatsApp commands invoked.`);
   } finally {
     axios.get = originalAxiosGet;

@@ -1,4 +1,5 @@
 const { isJidBroadcast, isJidGroup, isJidNewsletter } = require('baileys');
+const { BufferJSON } = require('baileys');
 const fs = require('fs/promises')
 const path = require('path')
 const { DataTypes } = require('sequelize');
@@ -9,7 +10,7 @@ const readJSON = async (file) => {
   try {
     const filePath = path.join(storeDir, file);
     const data = await fs.readFile(filePath, 'utf8');
-    return JSON.parse(data);
+    return JSON.parse(data, BufferJSON.reviver);
   } catch {
     return [];
   }
@@ -18,7 +19,7 @@ const readJSON = async (file) => {
 const writeJSON = async (file, data) => {
   const filePath = path.join(storeDir, file);
   await fs.mkdir(storeDir, { recursive: true });
-  await fs.writeFile(filePath, JSON.stringify(data, null, 2));
+  await fs.writeFile(filePath, JSON.stringify(data, BufferJSON.replacer, 2));
 };
 
 const saveContact = async (jid, name) => {
@@ -59,10 +60,10 @@ const saveMessage = async (message) => {
   await writeJSON('message.json', messages);
 };
 
-const loadMessage = async (id) => {
+const loadMessage = async (id, jid) => {
   if (!id) return null;
   const messages = await readJSON('message.json');
-  return messages.find((msg) => msg.id === id) || null;
+  return messages.find((msg) => msg.id === id && (!jid || msg.jid === jid)) || null;
 };
 
 const getName = async (jid) => {
